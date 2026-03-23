@@ -1,0 +1,12 @@
+# K3s bootstrap 단계에서 Argo CD Helm chart를 설치한다.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: argocd
+  namespace: kube-system
+spec:
+  repo: https://argoproj.github.io/argo-helm
+  chart: argo-cd
+  version: 9.2.4
+  targetNamespace: argocd
