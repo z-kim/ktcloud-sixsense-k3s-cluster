@@ -1,0 +1,13 @@
+# Checkins 애플리케이션 Service.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkins
+spec:
+  selector:
+    app: checkins
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

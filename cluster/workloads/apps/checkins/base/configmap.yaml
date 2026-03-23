@@ -1,0 +1,8 @@
+# Checkins 애플리케이션 기본 설정이다.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: checkins-config
+data:
+  APP_NAME: k3s-security-checkins

@@ -1,0 +1,9 @@
+write-kubeconfig-mode: "{{ k3s_server_write_kubeconfig_mode }}"
+disable:
+{% for component in k3s_server_disable_components %}
+  - {{ component }}
+{% endfor %}
+node-label:
+{% for label in k3s_server_node_labels %}
+  - {{ label }}
+{% endfor %}

@@ -1,0 +1,56 @@
+# Terraform state, plans, and local working directories
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+plan.out
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+.terraformrc
+terraform.rc
+
+# Python caches, test artifacts, and virtual environments
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+.tox/
+.nox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+.hypothesis/
+build/
+dist/
+*.egg-info/
+
+# Local environment files and secrets
+.env
+.env.*
+*.pem
+*.key
+ansible/vars/dev-runtime.yaml
+
+# Editor swap, backup, and local temp files
+*.swp
+*.swo
+*.tmp
+*.temp
+*~
+*.bak
+*.orig
+
+# Editor and OS files
+.vscode/
+.vscode-test/
+.idea/
+.DS_Store
+Thumbs.db

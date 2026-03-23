@@ -1,0 +1,12 @@
+# K3s bootstrap 단계에서 Falco Helm chart를 설치한다.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: falco
+  namespace: kube-system
+spec:
+  repo: https://falcosecurity.github.io/charts
+  chart: falco
+  version: 8.0.1
+  targetNamespace: falco

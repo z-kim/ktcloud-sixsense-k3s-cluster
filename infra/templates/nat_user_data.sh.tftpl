@@ -1,0 +1,20 @@
+#!/bin/bash
+# NAT instance가 부팅될 때 실행된다.
+# IP forwarding과 masquerade를 설정해 private subnet의 아웃바운드 트래픽을 중계한다.
+
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y iptables-persistent
+
+sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-nat-forwarding.conf
+
+PRIMARY_IFACE="$(ip route show default | awk '/default/ {print $5; exit}')"
+iptables -t nat -A POSTROUTING -o "$${PRIMARY_IFACE}" -j MASQUERADE
+iptables -F FORWARD
+iptables -A FORWARD -i "$${PRIMARY_IFACE}" -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -A FORWARD -o "$${PRIMARY_IFACE}" -j ACCEPT
+netfilter-persistent save
+systemctl enable netfilter-persistent

@@ -1,0 +1,6 @@
+---
+# Start empty and add packages only when a role actually needs them.
+common_packages: []
+ansible_user: ubuntu
+ansible_python_interpreter: /usr/bin/python3
+ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_PRIVATE_KEY_FILE') }}"

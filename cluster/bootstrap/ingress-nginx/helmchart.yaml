@@ -1,0 +1,12 @@
+# K3s bootstrap 단계에서 ingress-nginx Helm chart를 설치한다.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: ingress-nginx
+  namespace: kube-system
+spec:
+  repo: https://kubernetes.github.io/ingress-nginx
+  chart: ingress-nginx
+  version: 4.11.3
+  targetNamespace: ingress-nginx

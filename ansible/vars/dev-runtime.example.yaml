@@ -1,0 +1,7 @@
+---
+# terraform -chdir=../infra/environments/dev output -raw k3s_join_token
+k3s_token: "replace-with-terraform-output"
+
+# terraform -chdir=../infra/environments/dev output -raw mysql_rds_database_url
+# 또는 db 접속주소 (형식: mysql://username:password@DB주소:3306/DB이름)
+mysql_rds_database_url: ""

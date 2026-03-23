@@ -1,0 +1,79 @@
+# Falco를 모든 노드에 경량 설정으로 배치한다.
+
+falco:
+  buffered_outputs: false
+  config_files: []
+  load_plugins: []
+  plugins: []
+
+falcosidekick:
+  enabled: true
+  replicaCount: 2
+  config:
+    debug: true
+    # Kafka forwarding 예시.
+    # 실제로 사용할 때는 아래 주석을 해제하고 broker 주소와 topic을 맞춘다.
+    # Kafka는 보통 9092 포트를 많이 쓴다.
+    # 이 경우 worker node에서 Kafka broker:9092로 나갈 수 있어야 하고,
+    # Kafka 쪽 SG는 worker node SG에서 오는 ingress를 허용해야 한다.
+    # kafka:
+    #   hostport: "kafka-1:9092,kafka-2:9092,kafka-3:9092"
+    #   topic: "falco-events"
+    #   clientid: "falcosidekick"
+    #   minimumpriority: "warning"
+
+driver:
+  kind: modern_ebpf
+
+# worker-only 제약 X
+nodeSelector: {}
+
+tolerations:
+  - key: "node-role.kubernetes.io/control-plane"
+    operator: "Exists"
+    effect: "NoSchedule"
+  - key: "node-role.kubernetes.io/master"
+    operator: "Exists"
+    effect: "NoSchedule"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+
+falcoctl:
+  artifact:
+    install:
+      enabled: false
+    follow:
+      enabled: false
+
+customRules:
+  ingress-nginx-k8s-api-exception.yaml: |-
+    - rule: Contact K8S API Server From Container
+      desc: Ignore expected Kubernetes API access from ingress-nginx controller
+      append: true
+      condition: >
+        and not (
+          k8s.ns.name=ingress-nginx and
+          proc.name=nginx-ingress-c
+        )
+  ingress-nginx-crs-reload-shell-exception.yaml: |-
+    - rule: Run shell untrusted
+      desc: Ignore expected shell spawned during ingress-nginx reload and CRS file loading
+      append: true
+      condition: >
+        and not (
+          k8s.ns.name=ingress-nginx and
+          proc.name=sh and
+          proc.pname=nginx and
+          proc.aname[2]=nginx-ingress-c and
+          (
+            proc.cmdline contains "/etc/nginx/owasp-modsecurity-crs/" or
+            proc.cmdline contains ".data 2>/dev/null" or
+            proc.cmdline contains "crs-setup.conf"
+          )
+        )

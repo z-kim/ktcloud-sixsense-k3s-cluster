@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>K3s Security Checkins</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        max-width: 760px;
+        margin: 40px auto;
+        padding: 0 16px;
+        line-height: 1.5;
+      }
+      h1, h2 { margin-bottom: 8px; }
+      .meta {
+        margin-bottom: 24px;
+        padding: 12px 14px;
+        background: #f4f6f8;
+        border-radius: 8px;
+      }
+      form {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 24px;
+      }
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      input, button {
+        padding: 10px 12px;
+        font-size: 14px;
+      }
+      input {
+        flex: 1 1 260px;
+      }
+      button {
+        width: fit-content;
+        cursor: pointer;
+      }
+      ul {
+        list-style: none;
+        padding: 0;
+      }
+      li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+        border: 1px solid #d9dee3;
+        border-radius: 8px;
+      }
+      .user-info {
+        display: grid;
+        gap: 2px;
+      }
+      .user-meta {
+        color: #5a6570;
+        font-size: 13px;
+      }
+      .danger {
+        background: #b42318;
+        color: white;
+        border: none;
+        border-radius: 6px;
+      }
+      .status {
+        min-height: 24px;
+        margin-bottom: 12px;
+        color: #0f5132;
+      }
+      .error {
+        color: #b42318;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>K3s Security Checkins</h1>
+    <div class="meta" id="whoami">인스턴스 정보를 불러오는 중입니다.</div>
+
+    <h2>체크인 기록 남기기</h2>
+    <div class="status" id="status"></div>
+    <form id="checkin-form">
+      <input id="name" name="name" type="text" placeholder="이름" required />
+      <button type="submit">기록 남기기</button>
+    </form>
+
+    <div class="section-header">
+      <h2>체크인 기록</h2>
+      <button type="button" onclick="loadCheckins()">새로고침</button>
+    </div>
+    <ul id="checkin-list"></ul>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const whoamiEl = document.getElementById("whoami");
+      const checkinListEl = document.getElementById("checkin-list");
+      const formEl = document.getElementById("checkin-form");
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.className = isError ? "status error" : "status";
+      }
+
+      async function loadWhoami() {
+        const response = await fetch("/whoami");
+        const data = await response.json();
+        whoamiEl.innerHTML = `
+          <strong>pod</strong>: ${data.pod_name}<br />
+          <strong>node</strong>: ${data.node_name}
+        `;
+      }
+
+      async function loadCheckins() {
+        const response = await fetch("/checkins");
+        const data = await response.json();
+        checkinListEl.innerHTML = "";
+
+        if (!data.checkins.length) {
+          checkinListEl.innerHTML = "<li>아직 기록이 없습니다.</li>";
+          return;
+        }
+
+        for (const checkin of data.checkins) {
+          const item = document.createElement("li");
+          item.innerHTML = `
+            <div class="user-info">
+              <strong>${checkin.name}</strong>
+              <span class="user-meta">id=${checkin.id} / checked_at=${checkin.created_at}</span>
+            </div>
+            <button class="danger" type="button" data-id="${checkin.id}">삭제</button>
+          `;
+          item.querySelector("button").addEventListener("click", async () => {
+            await deleteCheckin(checkin.id);
+          });
+          checkinListEl.appendChild(item);
+        }
+      }
+
+      async function deleteCheckin(checkinId) {
+        const response = await fetch(`/checkins/${checkinId}`, { method: "DELETE" });
+        const data = await response.json();
+
+        if (!response.ok) {
+          setStatus(data.detail || "삭제에 실패했습니다.", true);
+          return;
+        }
+
+        setStatus(`체크인 ${checkinId} 삭제 완료`);
+        await loadCheckins();
+      }
+
+      formEl.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = {
+          name: document.getElementById("name").value
+        };
+
+        const response = await fetch("/checkins", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          setStatus(data.detail || "등록에 실패했습니다.", true);
+          return;
+        }
+
+        formEl.reset();
+        setStatus(`체크인 ${data.id} 기록 완료`);
+        await loadCheckins();
+      });
+
+      loadWhoami();
+      loadCheckins();
+    </script>
+  </body>
+</html>

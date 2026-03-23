@@ -1,0 +1,12 @@
+---
+- name: Update apt cache when common packages are requested
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: common_packages | length > 0
+
+- name: Install common packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+  when: common_packages | length > 0

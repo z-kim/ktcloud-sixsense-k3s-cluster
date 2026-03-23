@@ -1,0 +1,26 @@
+# 초기 bootstrap 단계에서 필요한 namespace를 미리 만든다.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring

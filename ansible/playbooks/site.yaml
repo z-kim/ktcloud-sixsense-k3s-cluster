@@ -1,0 +1,3 @@
+---
+- import_playbook: bastion.yaml
+- import_playbook: k3s_server.yaml

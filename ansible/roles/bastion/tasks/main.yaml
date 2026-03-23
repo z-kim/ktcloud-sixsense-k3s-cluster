@@ -1,0 +1,12 @@
+---
+- name: Update apt cache for bastion packages
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: bastion_packages | default([]) | length > 0
+
+- name: Install bastion packages
+  ansible.builtin.apt:
+    name: "{{ bastion_packages }}"
+    state: present
+  when: bastion_packages | default([]) | length > 0

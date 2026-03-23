@@ -1,0 +1,12 @@
+# dev 환경 이미지 태그를 덮어쓴다.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkins
+spec:
+  template:
+    spec:
+      containers:
+        - name: checkins
+          image: z33hyo/simple-checkins-web:0.2.1

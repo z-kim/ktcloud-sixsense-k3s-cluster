@@ -1,0 +1,29 @@
+# Checkins 애플리케이션 Ingress.
+# ingress-nginx가 외부 요청을 Checkins Service로 라우팅한다.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: checkins
+  annotations:
+    nginx.ingress.kubernetes.io/modsecurity-snippet: |
+      SecRuleEngine On
+      # 앱에서 DB 삭제를 해야하는데 DB item 삭제를 modsecurity 기본룰이 막아서 custom해준 것.
+      # 이 앱의 /checkins 경로에서만 DELETE를 허용하도록
+      # CRS rule 911100을 해당 요청에 한해 제외한다.
+      SecRule REQUEST_URI "@beginsWith /checkins" \
+        "id:100100,phase:1,pass,nolog,chain"
+      SecRule REQUEST_METHOD "@streq DELETE" \
+        "ctl:ruleRemoveById=911100"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: checkins
+                port:
+                  number: 80

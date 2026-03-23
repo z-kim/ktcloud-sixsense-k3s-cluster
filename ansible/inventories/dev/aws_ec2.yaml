@@ -1,0 +1,14 @@
+plugin: amazon.aws.aws_ec2
+regions:
+  - ap-northeast-2
+filters:
+  tag:Project: k3s-security
+  tag:Environment: dev
+  instance-state-name: running
+hostnames:
+  - tag:Name
+compose:
+  aws_name: ec2_tags.Name
+groups:
+  bastion: ec2_tags.Role == 'bastion'
+  k3s_server: ec2_tags.Role == 'k3s-control-plane'

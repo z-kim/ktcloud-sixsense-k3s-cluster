@@ -1,0 +1,64 @@
+# Checkins 애플리케이션 Deployment.
+# worker node에만 스케줄되도록 하고 health/readiness endpoint를 사용한다.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkins
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: checkins
+  template:
+    metadata:
+      labels:
+        app: checkins
+    spec:
+      nodeSelector:
+        node-role.k3s-project.io/worker: "true"
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: checkins
+      containers:
+        - name: checkins
+          # overlay에서 실제 이미지로 덮어쓸 것임.
+          image: placeholder.invalid/checkins:dev
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: checkins-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: checkins-secret
+                  key: database-url
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20

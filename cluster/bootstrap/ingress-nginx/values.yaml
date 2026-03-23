@@ -1,0 +1,27 @@
+# ingress-nginx bootstrap 설정이다.
+# ALB가 ingress-nginx의 worker NodePort로 트래픽을 전달한다.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: ingress-nginx
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    controller:
+      kind: DaemonSet
+      nodeSelector:
+        node-role.k3s-project.io/worker: "true"
+      hostNetwork: false
+      service:
+        type: NodePort
+        externalTrafficPolicy: Local
+        nodePorts:
+          http: 30080
+          https: 30443
+      config:
+        use-forwarded-headers: "true"
+        enable-modsecurity: "true"
+        enable-owasp-modsecurity-crs: "true"
+        allow-snippet-annotations: "true"
+        annotations-risk-level: Critical
