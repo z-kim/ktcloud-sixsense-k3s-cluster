@@ -50,6 +50,15 @@ spec:
                   name: checkins-secret
                   key: database-url
                   optional: true
+          # 앱 시작 시간이 길거나, 초기 로딩 중 /health 가 실패할 수 있는 경우
+          # startupProbe 를 추가해 livenessProbe 가 너무 빨리 재시작시키지 않도록 할 수 있음.
+          # 
+          # startupProbe:
+          #   httpGet:
+          #     path: /health
+          #     port: http
+          #   periodSeconds: 5
+          #   failureThreshold: 12
           readinessProbe:
             httpGet:
               path: /ready

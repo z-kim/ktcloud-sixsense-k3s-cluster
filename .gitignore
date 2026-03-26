@@ -38,6 +38,7 @@ dist/
 *.pem
 *.key
 ansible/vars/dev-runtime.yaml
+cluster/workloads/apps/checkins/overlays/dev/checkins-secret.local.yaml
 
 # Editor swap, backup, and local temp files
 *.swp
@@ -54,3 +55,6 @@ ansible/vars/dev-runtime.yaml
 .idea/
 .DS_Store
 Thumbs.db
+
+### external-ref
+external-ref

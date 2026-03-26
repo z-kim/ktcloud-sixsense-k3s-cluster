@@ -5,6 +5,8 @@ kind: HelmChart
 metadata:
   name: falco
   namespace: kube-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   repo: https://falcosecurity.github.io/charts
   chart: falco

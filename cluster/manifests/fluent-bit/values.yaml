@@ -1,0 +1,66 @@
+# K3s bootstrap 단계에서 Fluent Bit chart에 주입할 HelmChartConfig다.
+# 현재 목적은 ingress-nginx controller container log 중 ModSecurity 관련 로그만 Kafka로 전달하는 것이다.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: fluent-bit
+  namespace: kube-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  valuesContent: |-
+    kind: DaemonSet
+
+    tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+
+    config:
+      service: |
+        [SERVICE]
+            Daemon Off
+            Flush 1
+            Log_Level info
+            Parsers_File parsers.conf
+            HTTP_Server On
+            HTTP_Listen 0.0.0.0
+            HTTP_PORT 2020
+
+      inputs: |
+        [INPUT]
+            Name tail
+            Path /var/log/containers/*_ingress-nginx_controller-*.log
+            Tag ingress.modsecurity
+            Parser cri
+            Mem_Buf_Limit 20MB
+            Skip_Long_Lines On
+            Refresh_Interval 5
+
+      filters: |
+        [FILTER]
+            Name grep
+            Match ingress.modsecurity
+            Regex log ModSecurity
+
+      outputs: |
+        [OUTPUT]
+            Name kafka
+            Match ingress.modsecurity
+            Brokers kafka:9092
+            Topics modsecurity-log
+            Timestamp_Key @timestamp
+            Retry_Limit False
+            rdkafka.client.id fluent-bit-k3s
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
