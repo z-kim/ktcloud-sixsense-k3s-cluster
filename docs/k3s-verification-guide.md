@@ -97,11 +97,11 @@ kubectl get pods -n ingress-nginx -o wide -w
 
 ## 2. Node Exporter 확인
 
-현재 저장소 기준으로 node-exporter 는 bootstrap 리소스입니다.
+현재 저장소 기준으로 node-exporter 는 클러스터 공통 리소스입니다.
 
-- [daemonset.yaml](../cluster/bootstrap/node-exporter/daemonset.yaml)
+- [daemonset.yaml](../cluster/manifests/node-exporter/daemonset.yaml)
 
-즉 control-plane 이 부팅될 때 K3s manifests 디렉터리에 시드되고, `monitoring` namespace 에 DaemonSet 으로 올라가게 됩니다.
+즉 control-plane 이 부팅될 때 Ansible 이 먼저 반영하고, `monitoring` namespace 에 DaemonSet 으로 올라가게 됩니다.
 
 ### 2.1 DaemonSet 이 떠 있는지 확인
 
@@ -143,7 +143,7 @@ curl http://<worker-private-ip>:9100/metrics | grep node_filesystem
 
 현재 baseline 에는 Falcosidekick 이 켜져 있습니다.
 
-- [values.yaml](../cluster/bootstrap/falco/values.yaml)
+- [values.yaml](../cluster/manifests/falco/values.yaml)
 
 현재 의도는 아래와 같습니다.
 
@@ -244,7 +244,7 @@ kubectl delete pod busybox-api-test
 
 현재 구조에서 ModSecurity 는 별도 Pod 가 아니라 ingress-nginx 안에서 동작합니다.
 
-- [values.yaml](../cluster/bootstrap/ingress-nginx/values.yaml)
+- [values.yaml](../cluster/manifests/ingress-nginx/values.yaml)
 - [ingress.yaml](../cluster/workloads/apps/checkins/base/ingress.yaml)
 
 현재 범위에서는 ModSecurity 가 실제로 차단까지 수행하는지 깊게 검증하기보다는, ingress-nginx 안에 설정이 반영되어 켜져 있는지만 확인하면 충분합니다.

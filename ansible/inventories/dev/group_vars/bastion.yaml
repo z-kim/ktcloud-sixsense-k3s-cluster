@@ -1,5 +1,0 @@
----
-ansible_host: "{{ public_ip_address }}"
-bastion_packages:
-  - curl
-  - git
