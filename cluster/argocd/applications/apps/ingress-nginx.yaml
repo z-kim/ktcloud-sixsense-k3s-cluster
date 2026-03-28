@@ -10,8 +10,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/z-kim/ktcloud-sixsense-k3s.git
-    targetRevision: test-argocd
+    repoURL: https://github.com/z-kim/ktcloud-sixsense-k3s-cluster.git
+    targetRevision: main
     path: cluster/manifests/ingress-nginx
   destination:
     server: https://kubernetes.default.svc
