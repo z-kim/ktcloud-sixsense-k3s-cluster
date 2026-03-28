@@ -19,7 +19,7 @@ spec:
       enabled: true
       replicaCount: 2
       config:
-        debug: true
+        # debug: true
         # Kafka forwarding 예시.
         # 실제로 사용할 때는 아래 주석을 해제하고 broker 주소와 topic을 맞춘다.
         # Kafka는 보통 9092 포트를 많이 쓴다.

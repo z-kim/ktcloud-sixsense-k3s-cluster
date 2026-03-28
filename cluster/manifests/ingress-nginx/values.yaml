@@ -14,6 +14,38 @@ spec:
       kind: DaemonSet
       nodeSelector:
         node-role.k3s-project.io/worker: "true"
+      extraVolumes:
+        - name: modsecurity-audit
+          emptyDir: {}
+        - name: modsecurity-audit-sidecar-config
+          configMap:
+            name: modsecurity-audit-sidecar-config
+      extraVolumeMounts:
+        - name: modsecurity-audit
+          mountPath: /var/log/audit
+      extraContainers:
+        - name: fluent-bit-sidecar
+          image: cr.fluentbit.io/fluent/fluent-bit:4.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /fluent-bit/bin/fluent-bit
+          args:
+            - --workdir=/fluent-bit/etc
+            - --config=/fluent-bit/etc/conf/fluent-bit.conf
+          volumeMounts:
+            - name: modsecurity-audit
+              mountPath: /var/log/audit
+              readOnly: true
+            - name: modsecurity-audit-sidecar-config
+              mountPath: /fluent-bit/etc/conf
+              readOnly: true
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
       hostNetwork: false
       service:
         type: NodePort
@@ -27,3 +59,15 @@ spec:
         enable-owasp-modsecurity-crs: "true"
         allow-snippet-annotations: "true"
         annotations-risk-level: Critical
+        modsecurity-snippet: |
+          SecRuleEngine On
+          SecRule REQUEST_HEADERS:User-Agent "@streq ELB-HealthChecker/2.0" \
+            "id:200002,phase:1,pass,nolog,ctl:ruleRemoveById=920350"
+          SecRequestBodyAccess On
+          SecRule REQUEST_HEADERS:Content-Type "application/json" \
+            "id:200001,phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=JSON"
+          SecRequestBodyLimitAction Reject
+          SecAuditEngine RelevantOnly
+          SecAuditLogType Serial
+          SecAuditLog /var/log/audit/modsec_audit.log
+          SecAuditLogFormat JSON
