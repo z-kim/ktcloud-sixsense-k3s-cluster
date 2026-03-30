@@ -1,0 +1,23 @@
+# Doc Converter 애플리케이션 Ingress.
+# 루트 경로를 doc-converter 로 연결한다.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: doc-converter
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: doc-converter
+                port:
+                  number: 80
