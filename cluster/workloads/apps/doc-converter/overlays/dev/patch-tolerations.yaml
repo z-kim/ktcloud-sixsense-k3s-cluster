@@ -1,0 +1,18 @@
+# dev 환경에서 dead node를 오래 붙잡지 않도록 NoExecute toleration 시간을 짧게 둔다.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doc-converter
+spec:
+  template:
+    spec:
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 30

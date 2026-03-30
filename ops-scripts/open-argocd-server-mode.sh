@@ -3,8 +3,8 @@
 set -euo pipefail
 
 namespace="argocd"
-service_name="argocd-server"
 local_port="8080"
+argocd_server_selector="app.kubernetes.io/part-of=argocd,app.kubernetes.io/component=server"
 
 usage() {
   cat <<'EOF'
@@ -55,7 +55,23 @@ if ! [[ "$local_port" =~ ^[0-9]+$ ]] || [[ "$local_port" -lt 1 ]] || [[ "$local_
   exit 1
 fi
 
-kubectl get svc "${service_name}" -n "${namespace}" >/dev/null
+service_name="$(
+  kubectl get svc -n "${namespace}" -l "${argocd_server_selector}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+)"
+
+if [[ -z "${service_name}" ]]; then
+  service_name="$(
+    kubectl get svc argocd-server -n "${namespace}" \
+      -o jsonpath='{.metadata.name}' 2>/dev/null || true
+  )"
+fi
+
+if [[ -z "${service_name}" ]]; then
+  echo "Could not detect Argo CD server service in namespace ${namespace}." >&2
+  kubectl get svc -n "${namespace}" --show-labels 2>/dev/null || true
+  exit 1
+fi
 
 admin_password="$(
   kubectl get secret argocd-initial-admin-secret -n "${namespace}" \

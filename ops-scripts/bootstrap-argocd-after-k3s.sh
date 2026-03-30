@@ -11,8 +11,10 @@ force_bootstrap="false"
 namespace_file="${cluster_dir}/bootstrap/00-namespaces.yaml"
 argocd_values_file="${cluster_dir}/bootstrap/argocd/values.yaml"
 argocd_helmchart_file="${cluster_dir}/bootstrap/argocd/helmchart.yaml"
-checkins_secret_file="${cluster_dir}/references/bootstrap-inputs/checkins-secret.input.yaml"
+doc_converter_configmap_file="${cluster_dir}/references/bootstrap-inputs/doc-converter-configmap.input.yaml"
 kafka_alias_file="${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml"
+legacy_doc_converter_configmap_file="${cluster_dir}/references/bootstrap-inputs/doc-converter-configmap.yaml"
+legacy_doc_converter_configmap_typo_file="${cluster_dir}/references/bootstrap-inputs/docker-converter-configmap.yaml"
 argocd_cli_install_path="/usr/local/bin/argocd"
 argocd_cli_download_path="/tmp/argocd-linux-amd64"
 argocd_cli_port_forward_port="18080"
@@ -34,7 +36,8 @@ Usage:
 Options:
   -t, --timeout <seconds>          Rollout timeout in seconds (default: 300)
   --cluster-dir <path>             Cluster directory path
-  --checkins-secret-file <path>    Hardcoded checkins Secret manifest path
+  --doc-converter-configmap-file <path>
+                                   Hardcoded doc-converter ConfigMap manifest path
   --kafka-alias-file <path>        Hardcoded kafka alias manifest path
   --root-repo-url <url>            Root app repo URL
   --root-target-revision <rev>     Root app target revision (default: main)
@@ -46,10 +49,10 @@ Options:
 Notes:
   - This script assumes K3s is already installed and kubectl can reach the local cluster.
   - It mirrors the post-K3s part of external-ref Ansible:
-    namespace/bootstrap -> checkins-secret -> kafka-alias -> root-app
+    namespace/bootstrap -> doc-converter-config -> kafka-alias -> root-app
   - If the argocd CLI is missing, the script downloads and installs it after argocd-server becomes available.
   - Default operational mode is `argocd --core ...`. Server mode/UI access can be opened separately only when needed.
-  - For now, checkins-secret and kafka-alias are applied from hardcoded reference manifests.
+  - For now, doc-converter-config and kafka-alias are applied from hardcoded reference manifests.
 EOF
 }
 
@@ -63,8 +66,8 @@ while [[ $# -gt 0 ]]; do
       cluster_dir="$2"
       shift 2
       ;;
-    --checkins-secret-file)
-      checkins_secret_file="$2"
+    --doc-converter-configmap-file)
+      doc_converter_configmap_file="$2"
       shift 2
       ;;
     --kafka-alias-file)
@@ -169,15 +172,25 @@ require_file() {
   fi
 }
 
-validate_checkins_secret() {
-  if [[ ! -f "$checkins_secret_file" ]]; then
-    echo "checkins secret file not found: $checkins_secret_file" >&2
-    echo "Hint: copy ${cluster_dir}/references/bootstrap-inputs/checkins-secret.input.yaml.example to checkins-secret.input.yaml and fill database-url." >&2
+validate_doc_converter_configmap() {
+  if [[ ! -f "$doc_converter_configmap_file" ]]; then
+    if [[ -f "$legacy_doc_converter_configmap_file" ]]; then
+      warn "Using legacy doc-converter config path: ${legacy_doc_converter_configmap_file}"
+      doc_converter_configmap_file="$legacy_doc_converter_configmap_file"
+    elif [[ -f "$legacy_doc_converter_configmap_typo_file" ]]; then
+      warn "Using legacy doc-converter config path: ${legacy_doc_converter_configmap_typo_file}"
+      doc_converter_configmap_file="$legacy_doc_converter_configmap_typo_file"
+    fi
+  fi
+
+  if [[ ! -f "$doc_converter_configmap_file" ]]; then
+    echo "doc-converter configmap file not found: $doc_converter_configmap_file" >&2
+    echo "Hint: copy ${cluster_dir}/references/bootstrap-inputs/doc-converter-configmap.input.yaml.example to doc-converter-configmap.input.yaml and fill S3_BUCKET_NAME." >&2
     exit 1
   fi
 
-  if ! grep -Eq '^[[:space:]]*database-url:' "$checkins_secret_file"; then
-    echo "checkins secret file must contain a hardcoded database-url before apply: $checkins_secret_file" >&2
+  if ! grep -Eq '^[[:space:]]*S3_BUCKET_NAME:' "$doc_converter_configmap_file"; then
+    echo "doc-converter configmap file must contain a hardcoded S3_BUCKET_NAME before apply: $doc_converter_configmap_file" >&2
     exit 1
   fi
 }
@@ -354,7 +367,7 @@ require_file "$namespace_file"
 require_file "$argocd_values_file"
 require_file "$argocd_helmchart_file"
 require_file "$kafka_alias_file"
-validate_checkins_secret
+validate_doc_converter_configmap
 
 if [[ ! -x /usr/local/bin/k3s && ! -x /usr/local/bin/kubectl ]]; then
   echo "K3s does not appear to be installed on this server." >&2
@@ -389,8 +402,8 @@ fi
 
 install_argocd_cli
 
-print_header "Checkins Secret"
-kubectl apply -f "$checkins_secret_file"
+print_header "Doc Converter Config"
+kubectl apply -f "$doc_converter_configmap_file"
 
 print_header "Kafka Alias"
 kubectl apply -f "$kafka_alias_file"
@@ -401,6 +414,6 @@ kubectl apply -f "${render_dir}/root-app.yaml"
 
 print_header "Summary"
 kubectl get ns argocd logging apps
-kubectl get secret checkins-secret -n apps
+kubectl get configmap doc-converter-config -n apps
 kubectl get svc,endpointslice -n logging | grep kafka || true
 kubectl get application "${root_app_name}" -n argocd

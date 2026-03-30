@@ -1,0 +1,21 @@
+# Doc Converter 기본 HPA 설정.
+# worker 2대 환경에서 replica 를 2~4 범위로 제한적으로 조정한다.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: doc-converter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: doc-converter
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60

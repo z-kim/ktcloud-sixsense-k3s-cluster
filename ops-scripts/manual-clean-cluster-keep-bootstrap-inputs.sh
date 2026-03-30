@@ -10,16 +10,16 @@ delete_all="false"
 usage() {
   cat <<'EOF'
 Usage:
-  bash ops-scripts/manual-clean-cluster-keep-secret.sh [options]
+  bash ops-scripts/manual-clean-cluster-keep-bootstrap-inputs.sh [options]
 
 Options:
   -t, --timeout <seconds>   Namespace deletion timeout in seconds (default: 300)
-  --delete-all              Also delete apps/checkins-secret and related namespaces
+  --delete-all              Also delete doc-converter config, kafka alias, and related namespaces
   -h, --help                Show this help message
 
 Notes:
-  - Default behavior deletes cluster resources while keeping namespaces, apps/checkins-secret, and logging/kafka alias.
-  - Use --delete-all when you also want apps/checkins-secret, logging/kafka alias, and related namespaces removed.
+  - Default behavior deletes cluster resources while keeping namespaces, apps/doc-converter-config, and logging/kafka alias.
+  - Use --delete-all when you also want apps/doc-converter-config, logging/kafka alias, and related namespaces removed.
 EOF
 }
 
@@ -55,13 +55,17 @@ if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || [[ "$timeout_seconds" -lt 1 ]]; the
   exit 1
 fi
 
-if [[ ! -e "${cluster_dir}/workloads/apps/checkins/overlays/dev/kustomization.yaml" ]]; then
+if [[ ! -e "${cluster_dir}/bootstrap/00-namespaces.yaml" ]]; then
   echo "cluster directory not found under ${cluster_dir}" >&2
   exit 1
 fi
 
 print_header() {
   printf '\n== %s ==\n' "$1"
+}
+
+info() {
+  printf '[INFO] %s\n' "$1"
 }
 
 wait_for_namespace_delete() {
@@ -79,12 +83,18 @@ wait_for_namespace_delete() {
 }
 
 print_header "Stop Argo Applications"
-for app in root-app kafka-alias ingress-nginx fluent-bit falco node-exporter checkins-dev; do
-  kubectl delete application "$app" -n argocd --ignore-not-found >/dev/null 2>&1 || true
-done
+kubectl get applications -n argocd -o name 2>/dev/null \
+  | xargs -r kubectl delete -n argocd --ignore-not-found >/dev/null 2>&1 || true
 
-print_header "Delete Checkins Resources But Keep Secret"
-kubectl delete -k "${cluster_dir}/workloads/apps/checkins/overlays/dev" --ignore-not-found
+print_header "Delete App Resources But Keep Bootstrap Inputs"
+for app_overlay in "${cluster_dir}"/workloads/apps/*/overlays/dev; do
+  if [[ ! -e "${app_overlay}/kustomization.yaml" ]]; then
+    continue
+  fi
+
+  info "Deleting app overlay: ${app_overlay}"
+  kubectl delete -k "${app_overlay}" --ignore-not-found
+done
 
 print_header "Delete Node Exporter"
 kubectl delete -f "${cluster_dir}/manifests/node-exporter/daemonset.yaml" --ignore-not-found >/dev/null 2>&1 || true
@@ -116,6 +126,9 @@ kubectl delete secret -n logging -l owner=helm,name=fluent-bit --ignore-not-foun
 kubectl delete secret -n falco -l owner=helm,name=falco --ignore-not-found >/dev/null 2>&1 || true
 
 if [[ "$delete_all" == "true" ]]; then
+  print_header "Delete Doc Converter Config"
+  kubectl delete configmap doc-converter-config -n apps --ignore-not-found >/dev/null 2>&1 || true
+
   print_header "Delete Kafka Alias"
   kubectl delete -f "${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml" --ignore-not-found >/dev/null 2>&1 || true
 
@@ -130,9 +143,9 @@ if [[ "$delete_all" == "true" ]]; then
     wait_for_namespace_delete "$namespace"
   done
 else
-  print_header "Keep Namespaces, Secret, And Kafka Alias"
+  print_header "Keep Namespaces, ConfigMap, And Kafka Alias"
   echo "[INFO] Keeping ingress-nginx, logging, falco, monitoring, argocd, and apps namespaces."
-  echo "[INFO] Keeping apps/checkins-secret."
+  echo "[INFO] Keeping apps/doc-converter-config."
   echo "[INFO] Keeping logging/kafka alias."
   echo "[INFO] Cleaning legacy standalone fluent-bit resources too, if they still exist."
 fi
@@ -143,6 +156,6 @@ kubectl get pods -n kube-system -o name 2>/dev/null \
   | xargs -r kubectl delete -n kube-system >/dev/null 2>&1 || true
 
 print_header "Summary"
-kubectl get secret checkins-secret -n apps 2>/dev/null || true
+kubectl get configmap doc-converter-config -n apps 2>/dev/null || true
 kubectl get svc,endpointslice -n logging 2>/dev/null | grep kafka || true
 kubectl get pods -A
