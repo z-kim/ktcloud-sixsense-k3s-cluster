@@ -17,6 +17,7 @@ argocd_cli_install_path="/usr/local/bin/argocd"
 argocd_cli_download_path="/tmp/argocd-linux-amd64"
 argocd_cli_port_forward_port="18080"
 argocd_cli_port_forward_log="/tmp/argocd-cli-port-forward.log"
+argocd_server_selector="app.kubernetes.io/part-of=argocd,app.kubernetes.io/component=server"
 
 root_app_name="root-app"
 root_repo_url="https://github.com/z-kim/ktcloud-sixsense-k3s-cluster.git"
@@ -118,6 +119,48 @@ info() {
   printf '[INFO] %s\n' "$1"
 }
 
+get_argocd_server_deployment_name() {
+  local deployment_name=""
+
+  deployment_name="$(
+    kubectl get deployment -n argocd -l "${argocd_server_selector}" \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+  )"
+
+  if [[ -z "${deployment_name}" ]]; then
+    deployment_name="$(
+      kubectl get deployment argocd-server -n argocd \
+        -o jsonpath='{.metadata.name}' 2>/dev/null || true
+    )"
+  fi
+
+  printf '%s' "${deployment_name}"
+}
+
+get_argocd_server_service_name() {
+  local service_name=""
+
+  service_name="$(
+    kubectl get svc -n argocd -l "${argocd_server_selector}" \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+  )"
+
+  if [[ -z "${service_name}" ]]; then
+    service_name="$(
+      kubectl get svc argocd-server -n argocd \
+        -o jsonpath='{.metadata.name}' 2>/dev/null || true
+    )"
+  fi
+
+  printf '%s' "${service_name}"
+}
+
+print_argocd_bootstrap_diagnostics() {
+  warn "Current argocd namespace resources:"
+  kubectl get deploy,svc -n argocd --show-labels 2>/dev/null || true
+  kubectl get all -n argocd 2>/dev/null || true
+}
+
 require_file() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -186,17 +229,25 @@ EOF
 
 wait_for_argocd() {
   local seconds_left="$timeout_seconds"
+  local deployment_name=""
 
-  while ! kubectl get deployment argocd-server -n argocd >/dev/null 2>&1; do
+  while true; do
+    deployment_name="$(get_argocd_server_deployment_name)"
+    if [[ -n "${deployment_name}" ]]; then
+      break
+    fi
+
     if [[ "$seconds_left" -le 0 ]]; then
-      echo "Timed out waiting for deployment/argocd-server in namespace argocd." >&2
+      print_argocd_bootstrap_diagnostics
+      echo "Timed out waiting for Argo CD server deployment in namespace argocd." >&2
       exit 1
     fi
     sleep 5
     seconds_left=$((seconds_left - 5))
   done
 
-  kubectl rollout status deployment/argocd-server -n argocd --timeout="${timeout_seconds}s"
+  info "Detected Argo CD server deployment: ${deployment_name}"
+  kubectl rollout status "deployment/${deployment_name}" -n argocd --timeout="${timeout_seconds}s"
 }
 
 install_argocd_cli() {
@@ -224,8 +275,15 @@ install_argocd_cli() {
   info "argocd CLI not found. Downloading it from argocd-server."
   trap cleanup_argocd_cli_install RETURN
 
-  kubectl get deployment argocd-server -n argocd >/dev/null
-  kubectl port-forward svc/argocd-server -n argocd "${argocd_cli_port_forward_port}:443" >"${argocd_cli_port_forward_log}" 2>&1 &
+  local server_service_name=""
+  server_service_name="$(get_argocd_server_service_name)"
+  if [[ -z "${server_service_name}" ]]; then
+    print_argocd_bootstrap_diagnostics
+    echo "Could not detect Argo CD server service in namespace argocd." >&2
+    exit 1
+  fi
+
+  kubectl port-forward "svc/${server_service_name}" -n argocd "${argocd_cli_port_forward_port}:443" >"${argocd_cli_port_forward_log}" 2>&1 &
   pf_pid=$!
 
   while ! curl -kfsS -o /dev/null "$download_url"; do
@@ -313,7 +371,7 @@ argocd_bootstrap_required="false"
 if [[ "$force_bootstrap" == "true" ]]; then
   argocd_bootstrap_required="true"
 else
-  if ! kubectl get deployment argocd-server -n argocd >/dev/null 2>&1; then
+  if [[ -z "$(get_argocd_server_deployment_name)" ]]; then
     argocd_bootstrap_required="true"
   fi
 fi
@@ -326,7 +384,7 @@ if [[ "$argocd_bootstrap_required" == "true" ]]; then
   wait_for_argocd
 else
   print_header "Bootstrap"
-  warn "argocd-server already exists. Skipping namespace/Argo CD bootstrap."
+  warn "Argo CD server deployment already exists. Skipping namespace/Argo CD bootstrap."
 fi
 
 install_argocd_cli

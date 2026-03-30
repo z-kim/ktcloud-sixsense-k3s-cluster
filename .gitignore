@@ -56,5 +56,5 @@ cluster/references/bootstrap-inputs/*.input.yaml
 .DS_Store
 Thumbs.db
 
-### external-ref
-external-ref
+app/checkins
+app/doc-converter
