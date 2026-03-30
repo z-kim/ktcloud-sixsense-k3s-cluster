@@ -61,7 +61,7 @@ spec:
           #   failureThreshold: 12
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /health #### DB 꺼져있는 경우 있어서 임시로 바꿈 /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
