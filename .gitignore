@@ -39,6 +39,7 @@ dist/
 *.key
 cluster/references/bootstrap-inputs/*.local.yaml
 cluster/references/bootstrap-inputs/*.input.yaml
+cluster/references/bootstrap-inputs/disabled/*.input.yaml
 
 # Editor swap, backup, and local temp files
 *.swp
