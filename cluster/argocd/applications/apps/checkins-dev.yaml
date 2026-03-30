@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/z-kim/ktcloud-sixsense-k3s-cluster.git
-    targetRevision: main
+    targetRevision: test-argocd
     path: cluster/workloads/apps/checkins/overlays/dev
   destination:
     server: https://kubernetes.default.svc

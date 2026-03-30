@@ -9,4 +9,4 @@ spec:
     spec:
       containers:
         - name: checkins
-          image: z33hyo/simple-checkins-web:0.3
+          image: z33hyo/simple-checkins-web:0.3-v1
