@@ -72,6 +72,43 @@ fail() {
   status=1
 }
 
+check_resource_exists() {
+  local kind="$1"
+  local name="$2"
+  local namespace="$3"
+  local description="$4"
+
+  if kubectl get "$kind" "$name" -n "$namespace" >/dev/null 2>&1; then
+    ok "$description"
+  else
+    fail "$description"
+  fi
+}
+
+check_container_in_pod() {
+  local namespace="$1"
+  local label_selector="$2"
+  local container_name="$3"
+  local description="$4"
+  local pod_name=""
+  local containers=""
+
+  pod_name="$(kubectl get pods -n "$namespace" -l "$label_selector" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+
+  if [[ -z "$pod_name" ]]; then
+    fail "$description"
+    return
+  fi
+
+  containers="$(kubectl get pod "$pod_name" -n "$namespace" -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || true)"
+
+  if grep -qw "$container_name" <<<"$containers"; then
+    ok "$description"
+  else
+    fail "$description"
+  fi
+}
+
 run_rollout_check() {
   local kind="$1"
   local name="$2"
@@ -98,6 +135,8 @@ fi
 
 print_header "ingress-nginx"
 run_rollout_check daemonset ingress-nginx-controller ingress-nginx "ingress-nginx controller DaemonSet is ready"
+check_container_in_pod ingress-nginx "app.kubernetes.io/component=controller" fluent-bit-sidecar "ingress-nginx controller Pod includes fluent-bit-sidecar"
+check_resource_exists configmap modsecurity-audit-sidecar-config ingress-nginx "modsecurity audit sidecar ConfigMap exists"
 kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx -o wide 2>/dev/null || true
 
 print_header "Falcosidekick"

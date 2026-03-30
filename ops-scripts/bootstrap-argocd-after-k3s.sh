@@ -13,6 +13,10 @@ argocd_values_file="${cluster_dir}/bootstrap/argocd/values.yaml"
 argocd_helmchart_file="${cluster_dir}/bootstrap/argocd/helmchart.yaml"
 checkins_secret_file="${cluster_dir}/references/bootstrap-inputs/checkins-secret.input.yaml"
 kafka_alias_file="${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml"
+argocd_cli_install_path="/usr/local/bin/argocd"
+argocd_cli_download_path="/tmp/argocd-linux-amd64"
+argocd_cli_port_forward_port="18080"
+argocd_cli_port_forward_log="/tmp/argocd-cli-port-forward.log"
 
 root_app_name="root-app"
 root_repo_url="https://github.com/z-kim/ktcloud-sixsense-k3s-cluster.git"
@@ -42,6 +46,8 @@ Notes:
   - This script assumes K3s is already installed and kubectl can reach the local cluster.
   - It mirrors the post-K3s part of external-ref Ansible:
     namespace/bootstrap -> checkins-secret -> kafka-alias -> root-app
+  - If the argocd CLI is missing, the script downloads and installs it after argocd-server becomes available.
+  - Default operational mode is `argocd --core ...`. Server mode/UI access can be opened separately only when needed.
   - For now, checkins-secret and kafka-alias are applied from hardcoded reference manifests.
 EOF
 }
@@ -108,6 +114,10 @@ warn() {
   printf '[WARN] %s\n' "$1"
 }
 
+info() {
+  printf '[INFO] %s\n' "$1"
+}
+
 require_file() {
   local path="$1"
   if [[ ! -f "$path" ]]; then
@@ -151,6 +161,29 @@ ensure_kubeconfig() {
   exit 1
 }
 
+ensure_shell_kubeconfig_default() {
+  local bashrc="${HOME}/.bashrc"
+  local start_marker="# >>> sixsense kubeconfig >>>"
+  local end_marker="# <<< sixsense kubeconfig <<<"
+
+  touch "${bashrc}"
+
+  if grep -Fq "${start_marker}" "${bashrc}"; then
+    return 0
+  fi
+
+  cat >> "${bashrc}" <<'EOF'
+
+# >>> sixsense kubeconfig >>>
+if [ -z "${KUBECONFIG:-}" ] && [ -f "$HOME/.kube/config" ]; then
+  export KUBECONFIG="$HOME/.kube/config"
+fi
+# <<< sixsense kubeconfig <<<
+EOF
+
+  info "Added KUBECONFIG default to ${bashrc}. Re-login or run: source ~/.bashrc"
+}
+
 wait_for_argocd() {
   local seconds_left="$timeout_seconds"
 
@@ -164,6 +197,60 @@ wait_for_argocd() {
   done
 
   kubectl rollout status deployment/argocd-server -n argocd --timeout="${timeout_seconds}s"
+}
+
+install_argocd_cli() {
+  local pf_pid=""
+  local seconds_left="$timeout_seconds"
+  local download_url="https://127.0.0.1:${argocd_cli_port_forward_port}/download/argocd-linux-amd64"
+  cleanup_argocd_cli_install() {
+    if [[ -n "${pf_pid}" ]]; then
+      kill "${pf_pid}" >/dev/null 2>&1 || true
+    fi
+    rm -f "${argocd_cli_download_path}"
+  }
+
+  if command -v argocd >/dev/null 2>&1; then
+    info "argocd CLI already exists in PATH."
+    return 0
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl not found. Cannot install argocd CLI automatically." >&2
+    exit 1
+  fi
+
+  print_header "Argo CD CLI"
+  info "argocd CLI not found. Downloading it from argocd-server."
+  trap cleanup_argocd_cli_install RETURN
+
+  kubectl get deployment argocd-server -n argocd >/dev/null
+  kubectl port-forward svc/argocd-server -n argocd "${argocd_cli_port_forward_port}:443" >"${argocd_cli_port_forward_log}" 2>&1 &
+  pf_pid=$!
+
+  while ! curl -kfsS -o /dev/null "$download_url"; do
+    if [[ "$seconds_left" -le 0 ]]; then
+      echo "Timed out waiting for argocd CLI download endpoint." >&2
+      exit 1
+    fi
+    sleep 5
+    seconds_left=$((seconds_left - 5))
+  done
+
+  curl -kSL -o "${argocd_cli_download_path}" "$download_url"
+  chmod 0755 "${argocd_cli_download_path}"
+
+  if [[ -w "$(dirname "${argocd_cli_install_path}")" ]]; then
+    install -m 0755 "${argocd_cli_download_path}" "${argocd_cli_install_path}"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo install -m 0755 "${argocd_cli_download_path}" "${argocd_cli_install_path}"
+  else
+    echo "Cannot write ${argocd_cli_install_path}. Re-run with sufficient privileges or install argocd manually." >&2
+    exit 1
+  fi
+
+  trap - RETURN
+  cleanup_argocd_cli_install
 }
 
 render_root_app() {
@@ -217,6 +304,7 @@ if [[ ! -x /usr/local/bin/k3s && ! -x /usr/local/bin/kubectl ]]; then
 fi
 
 ensure_kubeconfig
+ensure_shell_kubeconfig_default
 
 print_header "Kubernetes"
 kubectl get nodes >/dev/null
@@ -240,6 +328,8 @@ else
   print_header "Bootstrap"
   warn "argocd-server already exists. Skipping namespace/Argo CD bootstrap."
 fi
+
+install_argocd_cli
 
 print_header "Checkins Secret"
 kubectl apply -f "$checkins_secret_file"
