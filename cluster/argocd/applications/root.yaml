@@ -8,8 +8,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/z-kim/ktcloud-sixsense-k3s.git
-    targetRevision: test-argocd
+    repoURL: https://github.com/z-kim/ktcloud-sixsense-k3s-cluster.git
+    targetRevision: main
     path: cluster/argocd/applications/apps
   destination:
     server: https://kubernetes.default.svc

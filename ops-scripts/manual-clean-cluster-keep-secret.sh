@@ -106,7 +106,7 @@ fi
 
 if [[ "$delete_all" == "true" ]]; then
   print_header "Delete Kafka Alias"
-  kubectl delete -f "${cluster_dir}/manifests/kafka-alias/kafka-alias.yaml" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete -f "${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml" --ignore-not-found >/dev/null 2>&1 || true
 
   print_header "Delete Namespaces"
   kubectl delete secret checkins-secret -n apps --ignore-not-found >/dev/null 2>&1 || true

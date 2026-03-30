@@ -9,7 +9,8 @@ skip_prereqs="false"
 prereqs_only="false"
 secret_file=""
 allow_missing_secret="false"
-default_secret_file="${cluster_dir}/workloads/apps/checkins/overlays/dev/checkins-secret.local.yaml"
+default_secret_file="${cluster_dir}/references/bootstrap-inputs/checkins-secret.input.yaml"
+legacy_secret_file="${cluster_dir}/workloads/apps/checkins/overlays/dev/checkins-secret.local.yaml"
 
 usage() {
   cat <<'EOF'
@@ -26,7 +27,8 @@ Options:
 
 Notes:
   - Assumes the repository's cluster/ directory is present on the machine.
-  - If --secret-file is omitted, the script auto-uses cluster/workloads/apps/checkins/overlays/dev/checkins-secret.local.yaml when present.
+  - If --secret-file is omitted, the script auto-uses cluster/references/bootstrap-inputs/checkins-secret.input.yaml when present.
+  - If the new bootstrap input file is absent, the script falls back to the legacy checkins-secret.local.yaml path when present.
   - By default, Checkins is skipped when checkins-secret is missing.
   - Prereqs means namespace bootstrap + checkins-secret + logging/kafka alias.
 EOF
@@ -80,7 +82,7 @@ required_paths=(
   "${cluster_dir}/bootstrap/00-namespaces.yaml"
   "${cluster_dir}/manifests/ingress-nginx/values.yaml"
   "${cluster_dir}/manifests/ingress-nginx/helmchart.yaml"
-  "${cluster_dir}/manifests/kafka-alias/kafka-alias.yaml"
+  "${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml"
   "${cluster_dir}/manifests/falco/values.yaml"
   "${cluster_dir}/manifests/falco/helmchart.yaml"
   "${cluster_dir}/manifests/node-exporter/daemonset.yaml"
@@ -94,8 +96,12 @@ for path in "${required_paths[@]}"; do
   fi
 done
 
-if [[ -z "$secret_file" && -e "$default_secret_file" ]]; then
-  secret_file="$default_secret_file"
+if [[ -z "$secret_file" ]]; then
+  if [[ -e "$default_secret_file" ]]; then
+    secret_file="$default_secret_file"
+  elif [[ -e "$legacy_secret_file" ]]; then
+    secret_file="$legacy_secret_file"
+  fi
 fi
 
 if [[ -n "$secret_file" && ! -e "$secret_file" ]]; then
@@ -136,7 +142,7 @@ apply_prereqs() {
     kubectl apply -f "$secret_file"
   fi
 
-  kubectl apply -f "${cluster_dir}/manifests/kafka-alias/kafka-alias.yaml"
+  kubectl apply -f "${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml"
 }
 
 if [[ "$skip_prereqs" == "true" ]]; then
