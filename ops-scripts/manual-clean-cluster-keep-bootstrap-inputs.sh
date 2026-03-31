@@ -68,12 +68,52 @@ info() {
   printf '[INFO] %s\n' "$1"
 }
 
+warn() {
+  printf '[WARN] %s\n' "$1"
+}
+
+delete_argocd_applications() {
+  local apps lingering
+
+  apps="$(kubectl get applications -n argocd -o name 2>/dev/null || true)"
+  if [[ -z "$apps" ]]; then
+    info "No Argo Applications found."
+    return
+  fi
+
+  printf '%s\n' "$apps" \
+    | xargs -r kubectl delete -n argocd --ignore-not-found --wait=false >/dev/null 2>&1 || true
+
+  sleep 5
+
+  lingering="$(kubectl get applications -n argocd -o name 2>/dev/null || true)"
+  if [[ -z "$lingering" ]]; then
+    return
+  fi
+
+  warn "Argo Applications are still present. Removing finalizers and retrying delete."
+  while IFS= read -r app; do
+    [[ -z "$app" ]] && continue
+    kubectl patch -n argocd "$app" --type merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+    kubectl delete -n argocd "$app" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  done <<<"$lingering"
+}
+
 wait_for_namespace_delete() {
   local namespace="$1"
   local seconds_left="$timeout_seconds"
+  local finalizers_cleared="false"
 
   while kubectl get namespace "$namespace" >/dev/null 2>&1; do
     if [[ "$seconds_left" -le 0 ]]; then
+      if [[ "$finalizers_cleared" == "false" ]]; then
+        warn "Namespace/$namespace is still terminating. Clearing namespace finalizers once."
+        kubectl patch namespace "$namespace" --type merge -p '{"spec":{"finalizers":[]}}' >/dev/null 2>&1 || true
+        seconds_left=30
+        finalizers_cleared="true"
+        continue
+      fi
+
       echo "Timed out waiting for namespace/$namespace to be deleted." >&2
       exit 1
     fi
@@ -83,8 +123,7 @@ wait_for_namespace_delete() {
 }
 
 print_header "Stop Argo Applications"
-kubectl get applications -n argocd -o name 2>/dev/null \
-  | xargs -r kubectl delete -n argocd --ignore-not-found >/dev/null 2>&1 || true
+delete_argocd_applications
 
 print_header "Delete App Resources But Keep Bootstrap Inputs"
 for app_overlay in "${cluster_dir}"/workloads/apps/*/overlays/dev; do
@@ -93,19 +132,19 @@ for app_overlay in "${cluster_dir}"/workloads/apps/*/overlays/dev; do
   fi
 
   info "Deleting app overlay: ${app_overlay}"
-  kubectl delete -k "${app_overlay}" --ignore-not-found
+  kubectl delete -k "${app_overlay}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 done
 
 print_header "Delete Node Exporter"
-kubectl delete -f "${cluster_dir}/manifests/node-exporter/daemonset.yaml" --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete -f "${cluster_dir}/manifests/node-exporter/daemonset.yaml" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
 print_header "Delete ingress-nginx Sidecar Config"
-kubectl delete -f "${cluster_dir}/manifests/ingress-nginx/modsecurity-audit-sidecar-config.yaml" --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete -f "${cluster_dir}/manifests/ingress-nginx/modsecurity-audit-sidecar-config.yaml" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
 print_header "Delete HelmChart Resources"
 for chart in argocd ingress-nginx fluent-bit falco; do
-  kubectl delete helmchart "$chart" -n kube-system --ignore-not-found >/dev/null 2>&1 || true
-  kubectl delete helmchartconfig "$chart" -n kube-system --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete helmchart "$chart" -n kube-system --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl delete helmchartconfig "$chart" -n kube-system --ignore-not-found --wait=false >/dev/null 2>&1 || true
 done
 
 if command -v helm >/dev/null 2>&1; then
@@ -127,13 +166,13 @@ kubectl delete secret -n falco -l owner=helm,name=falco --ignore-not-found >/dev
 
 if [[ "$delete_all" == "true" ]]; then
   print_header "Delete Doc Converter Config"
-  kubectl delete configmap doc-converter-config -n apps --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete configmap doc-converter-config -n apps --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
   print_header "Delete Kafka Alias"
-  kubectl delete -f "${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete -f "${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
   print_header "Delete Namespaces"
-  kubectl delete secret checkins-secret -n apps --ignore-not-found >/dev/null 2>&1 || true
+  kubectl delete secret checkins-secret -n apps --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
   for namespace in ingress-nginx logging falco monitoring argocd apps; do
     kubectl delete namespace "$namespace" --ignore-not-found --wait=false >/dev/null 2>&1 || true
