@@ -15,8 +15,10 @@
 
 - K3s 기반 클러스터 리소스 구성 방식
 - ingress-nginx, Falco, Fluent Bit, node-exporter 등의 배치 방식
+  - ModSecurity, Falco 등의 로그는 Fluent Bit과 Falcosidekick을 통해 별도 Kafka 서버로 전송됩니다.
 - Argo CD app-of-apps 구조 적용 방식
-- 수동 적용 또는 GitOps 적용을 고려한 리소스 설계
+- ArgoCD를 통한 Github 저장소 연동 및 배포 흐름
+- GitOps 적용을 고려한 리소스 설계
 - Terraform / Ansible 과 Kubernetes 리소스 구성의 경계 분리
 
 ## 현재 구성 핵심
@@ -43,15 +45,15 @@
 이 저장소에서 현재 다루는 설치 대상은 주로 아래와 같습니다.
 
 - Argo CD
-- ingress-nginx
-- Falco
+- ingress-nginx (+modsecurity),
 - Fluent Bit
+- Falco
 - node-exporter
-- 예시 애플리케이션 배포 리소스
+- doc-converter(우리가 서비스할 앱으로, 다른 팀원이 개발)
 
-## Checkins 앱에 대해
+## Checkins 앱에 대해 (deprecated)
 
-`checkins` 앱은 현재 임시 확인 및 예시 배포용으로 포함된 리소스로, 웹앱을 올려서 아래 내용을 보여주고자 합니다.
+`checkins` 앱은임시 확인 및 예시 배포용으로 포함된 리소스입니다.
 
 - 애플리케이션을 K3s 위에 어떤 방식으로 배포하는지
 - Secret / ConfigMap / Ingress / HPA / Probe 등을 어떻게 구성하는지
