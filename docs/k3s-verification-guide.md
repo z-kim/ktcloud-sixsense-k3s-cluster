@@ -2,12 +2,13 @@
 
 이 문서는 현재 클러스터가 떠 있는 상태에서 아래 항목을 확인하는 절차를 정리한 문서입니다.
 
-- Checkins 앱에 CPU 부하를 걸었을 때 HPA 가 어떻게 반응하는지
+- Doc Converter 앱에 CPU 부하를 걸었을 때 HPA 가 어떻게 반응하는지
 - worker node 장애 또는 drain 상황에서 Pod 가 어떻게 이동하는지
 - node-exporter 가 각 노드에 정상적으로 올라가 있는지
 - Falcosidekick 이 Falco 이벤트를 실제로 받고 있는지
 - Argo CD 핵심 컴포넌트가 정상적으로 떠 있는지
 - ModSecurity 가 ingress-nginx 안에서 켜져 있는지
+- `fluent-bit-sidecar` 가 ModSecurity audit 로그를 실제로 읽고 있는지
 
 빠르게 전체 상태만 먼저 보고 싶다면 아래 스크립트를 사용할 수 있습니다.
 
@@ -15,7 +16,7 @@
 bash ops-scripts/quick-check-k3s.sh
 ```
 
-ALB 응답까지 같이 보고 싶으면 아래처럼 실행합니다.
+외부 접속 주소 응답까지 같이 보고 싶으면 아래처럼 실행합니다.
 
 ```bash
 bash ops-scripts/quick-check-k3s.sh --alb-url http://<alb-dns-name>
@@ -25,17 +26,18 @@ bash ops-scripts/quick-check-k3s.sh --alb-url http://<alb-dns-name>
 
 - `kubectl` 이 클러스터에 연결되는지
 - `ingress-nginx-controller` 가 준비되었는지
+- `ingress-nginx` Pod 에 `fluent-bit-sidecar` 가 같이 있는지
+- `modsecurity-audit-sidecar-config` ConfigMap 이 있는지
 - `falco-falcosidekick` 이 준비되었는지
 - `node-exporter` DaemonSet 이 각 노드에 맞게 떠 있는지
 - `argocd-server`, `argocd-repo-server` 가 준비되었는지
-- `checkins` Deployment / Service / Ingress 가 보이는지
-- 필요하면 ALB `/health` 응답이 오는지
+- `doc-converter` Deployment / Service / Ingress 가 보이는지
+- 필요하면 ingress-nginx `/health` 응답이 오는지
 
 ## 1. HPA 와 장애 대응 확인
 
-이 문서에서는 HPA 가 왜 늘어나고 줄어드는지까지 자세히 설명하기보다는, 현재 상태를 어떻게 확인할지에 집중합니다.
 
-### 1.1 Checkins 기본 상태 확인
+### 1.1 Doc Converter 기본 상태 확인
 
 먼저 아래 명령으로 기본 상태를 확인합니다.
 
@@ -43,19 +45,21 @@ bash ops-scripts/quick-check-k3s.sh --alb-url http://<alb-dns-name>
 kubectl get deploy,hpa -n apps
 kubectl get pods -n apps -o wide
 kubectl get ingress -n apps
-kubectl rollout status deployment/checkins -n apps
+kubectl rollout status deployment/doc-converter -n apps
 ```
 
 확인 포인트는 아래와 같습니다.
 
-- `deployment/checkins` 가 `Available` 상태인지 확인합니다.
-- `hpa/checkins` 가 보이는지 확인합니다.
-- Checkins Pod 가 worker node 에 올라가 있는지 확인합니다.
-- `ingress/checkins` 가 생성되어 있는지 확인합니다.
+- `deployment/doc-converter` 가 `Available` 상태인지 확인합니다.
+- `hpa/doc-converter` 가 보이는지 확인합니다.
+- Doc Converter Pod 가 worker node 에 올라가 있는지 확인합니다.
+- `ingress/doc-converter` 가 생성되어 있는지 확인합니다.
 
 ### 1.2 HPA 반응 간단 확인
 
-HPA 동작을 간단히 보고 싶다면 아래처럼 부하를 걸고 상태 변화를 봅니다.
+부하를 걸고 pod가 늘어나는 것을 볼 수 있습니다.
+
+부하 종료 후 시간이 지나 다시 pod가 줄어드는 것을 볼 수 있습니다.
 
 ```bash
 kubectl get hpa -n apps -w
@@ -65,14 +69,14 @@ kubectl get pods -n apps -w
 다른 터미널에서:
 
 ```bash
-bash ops-scripts/stress-pods.sh -n apps -l app=checkins -p 1 -s 60
+bash ops-scripts/stress-pods.sh -n apps -l app=doc-converter -p 1 -s 60
 ```
 
 여기서는 replica 수가 실제로 바뀌는지 정도만 확인하면 충분합니다.
 
 ### 1.3 Pod 복구 확인
 
-Pod 하나를 지웠을 때 다시 복구되는지만 보고 싶다면 아래 명령을 사용합니다.
+아래 명령을 사용, 파드를 지웠을 때 복구되는 것을 볼 수 있습니다.
 
 ```bash
 kubectl delete pod -n apps <pod-name>
@@ -89,19 +93,18 @@ kubectl get pods -n apps -o wide -w
 kubectl get pods -n ingress-nginx -o wide -w
 ```
 
-여기서는 아래 정도만 보면 됩니다.
+여기서는 다음을 기대합니다.
 
-- 해당 node 가 `NotReady` 또는 `Unreachable` 로 바뀌는지
-- Checkins Pod 와 ingress-nginx Pod 가 영향 받는지
-- 대체 worker 가 뜬 뒤 다시 스케줄되는지
+- 해당 node 가 `NotReady` 또는 `Unreachable` 로 바뀌는 것
+- Doc Converter Pod 와 ingress-nginx Pod 가 영향 받는 것
+- 대체 worker 가 뜬 뒤 다시 스케줄되는 것
 
 ## 2. Node Exporter 확인
 
-현재 저장소 기준으로 node-exporter 는 클러스터 공통 리소스입니다.
+node-exporter는 `monitoring` namespace에 Daemonset으로 올라갑니다. Control plane에도 올라갑니다.
 
 - [daemonset.yaml](../cluster/manifests/node-exporter/daemonset.yaml)
 
-즉 control-plane 이 부팅될 때 Ansible 이 먼저 반영하고, `monitoring` namespace 에 DaemonSet 으로 올라가게 됩니다.
 
 ### 2.1 DaemonSet 이 떠 있는지 확인
 
@@ -137,21 +140,18 @@ curl http://<worker-private-ip>:9100/metrics | grep node_memory
 curl http://<worker-private-ip>:9100/metrics | grep node_filesystem
 ```
 
-즉 각 노드에 SSH 로 직접 들어가지 않아도, control-plane 에서 노드 private IP 를 향해 `curl` 하는 방식으로 충분히 확인할 수 있습니다.
-
 ## 3. Falcosidekick 확인
 
-현재 baseline 에는 Falcosidekick 이 켜져 있습니다.
+현재 Demonset으로 Falco가, Deployment로 Falcosidekick 이 켜져 있습니다.
 
 - [values.yaml](../cluster/manifests/falco/values.yaml)
 
-현재 의도는 아래와 같습니다.
+Sidekick은 이벤트를 받으면 Kafka 등으로 실시간 전송할 수 있습니다. 필요하면 `debug: true` 를 임시로 켜서 이벤트 흐름을 더 자세히 볼 수 있습니다.
 
 - `falcosidekick.enabled: true`
 - `falcosidekick.replicaCount: 2`
-- `falcosidekick.config.debug: true`
+- `falcosidekick.config.debug` 는 현재 기본값으로는 꺼져 있고, 필요할 때만 임시로 켜는 쪽이 좋습니다.
 
-즉 Sidekick 이 켜져 있고, 이벤트를 받으면 디버그 로그로 흐름을 확인하기 쉽게 해둔 상태입니다.
 
 ### 3.1 Falco 와 Falcosidekick Pod 상태 확인
 
@@ -201,7 +201,59 @@ kubectl logs -n falco -l app.kubernetes.io/name=falcosidekick -f --prefix
 - Pod 하나만 빠르게 볼 때는 `deploy/falco-falcosidekick`
 - 두 replica 중 어느 쪽이 이벤트를 처리하는지까지 보려면 `-l app.kubernetes.io/name=falcosidekick --prefix`
 
-### 3.3 Falco 로그 참고 확인
+### 3.3 Falcosidekick debug 를 임시로 켜서 보기
+
+조금 더 자세한 이벤트 흐름이 필요하면 [values.yaml](../cluster/manifests/falco/values.yaml) 에서 아래처럼 `debug: true` 를 잠깐 켤 수 있습니다.
+
+```yaml
+falcosidekick:
+  enabled: true
+  replicaCount: 2
+  config:
+    debug: true
+```
+
+적용:
+
+```bash
+kubectl apply -f ~/cluster/manifests/falco/values.yaml
+kubectl apply -f ~/cluster/manifests/falco/helmchart.yaml
+kubectl rollout status deployment/falco-falcosidekick -n falco --timeout=5m
+```
+
+확인:
+
+```bash
+kubectl logs -n falco -l app.kubernetes.io/name=falcosidekick -f --prefix
+```
+
+기대하는 흐름은 아래와 같습니다.
+
+- Falco 에서 넘어온 이벤트 payload 가 더 자세히 보입니다.
+- Kafka 전송 시도나 실패 흔적이 더 직접적으로 보일 수 있습니다.
+- 두 replica 중 어느 Pod 가 이벤트를 받는지도 더 쉽게 확인할 수 있습니다.
+
+### 3.4 확인이 끝난 뒤 원복
+
+`debug: true` 는 평소에 계속 켜 두기보다, 확인이 끝나면 다시 주석 처리하거나 제거하는 편이 좋습니다.
+
+```yaml
+falcosidekick:
+  enabled: true
+  replicaCount: 2
+  config:
+    # debug: true
+```
+
+그 다음 다시 적용합니다.
+
+```bash
+kubectl apply -f ~/cluster/manifests/falco/values.yaml
+kubectl apply -f ~/cluster/manifests/falco/helmchart.yaml
+kubectl rollout status deployment/falco-falcosidekick -n falco --timeout=5m
+```
+
+### 3.5 Falco 로그 참고 확인
 
 터미널 2 에서 아래 명령으로 Falco 로그를 볼 수 있습니다.
 
@@ -211,9 +263,9 @@ kubectl logs -n falco ds/falco -f
 
 다만 Falco 쪽 로그는 상황에 따라 Falcosidekick 로그보다 덜 즉각적으로 보일 수 있으므로, 현재 확인의 중심은 `falcosidekick` 로그가 잘 뜨는지에 두는 편이 좋습니다.
 
-### 3.4 재현 쉬운 Falco 이벤트 만들기
+### 3.6 재현 쉬운 Falco 이벤트 만들기
 
-터미널 3 에서 아래처럼 임시 BusyBox Pod 를 만들어 `exec` 합니다.
+터미널 3 에서 아래처럼 임시 BusyBox Pod 를 만들어 `exec` 합니다. 또는 파드 내에서 `cat /etc/shadow`를 실행해볼 수 있습니다.
 
 ```bash
 kubectl run busybox-shell-test --image=busybox -- sleep 3600
@@ -229,25 +281,22 @@ kubectl exec busybox-api-test -- wget -qO- --no-check-certificate https://kubern
 kubectl delete pod busybox-api-test
 ```
 
-이런 명령은 현재 저장소 기준으로 Falco 기본 rule 테스트에 자주 쓸 수 있습니다.
 
-### 3.5 확인 포인트
+### 3.7 확인 포인트
 
 성공적으로 이어지면 보통 아래 흐름을 기대합니다.
 
 1. Falco 쪽에서 rule 이 탐지됩니다.
 2. Falcosidekick 로그에도 이벤트 처리 흔적이 보입니다.
 
-현재는 `debug: true` 상태라, 우선은 Falcosidekick 로그에 이벤트가 잘 뜨는지 확인하는 방향으로 보면 충분합니다.
 
 ## 4. ModSecurity 확인
 
-현재 구조에서 ModSecurity 는 별도 Pod 가 아니라 ingress-nginx 안에서 동작합니다.
+현재 구조에서 ingress-nginx 안에서 동작합니다.
 
 - [values.yaml](../cluster/manifests/ingress-nginx/values.yaml)
-- [ingress.yaml](../cluster/workloads/apps/checkins/base/ingress.yaml)
-
-현재 범위에서는 ModSecurity 가 실제로 차단까지 수행하는지 깊게 검증하기보다는, ingress-nginx 안에 설정이 반영되어 켜져 있는지만 확인하면 충분합니다.
+- [ingress.yaml](../cluster/workloads/apps/doc-converter/base/ingress.yaml)
+- 자세한 sidecar 검증 흐름은 [fluent-bit-test-without-kafka-guide.md](./fluent-bit-test-without-kafka-guide.md) 에 따로 정리되어 있습니다.
 
 ### 4.1 ingress-nginx Pod 확인
 
@@ -270,6 +319,147 @@ kubectl get pods -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx
 kubectl exec -n ingress-nginx <ingress-pod-name> -- sh -c "grep -i modsecurity /etc/nginx/nginx.conf"
 ```
 
-여기서 `modsecurity on;` 같은 설정이 보이면 ModSecurity 가 ingress-nginx 안에 반영된 것으로 보면 됩니다.
+여기서 `modsecurity on;` 같은 설정이 보이면 ModSecurity 가 ingress-nginx 안에 반영된 것입니다.
 
-이 방식은 "ALB 문제인지, ingress / ModSecurity 문제인지"를 분리해서 보기 좋습니다.
+### 4.3 간단한 SQLi / XSS 요청으로 동작 확인
+
+실제 요청에서 ModSecurity 가 반응하는지도 간단히 볼 수 있습니다. 아래 예시는 harmless test payload 를 query string 으로 보내는 방식입니다.
+
+먼저 외부 접속 주소나 ingress 로 접근 가능한 URL 을 준비합니다.
+
+```bash
+export APP_URL=http://<external-address>
+```
+
+SQLi 성격의 요청 예시:
+
+- 원문: `1 OR 1=1`
+- URL 인코딩 형태: `1%20OR%201%3D1`
+
+```bash
+curl -i "${APP_URL}/?q=1%20OR%201%3D1"
+```
+
+XSS 성격의 요청 예시:
+
+- 원문: `<script>alert(1)</script>`
+- URL 인코딩 형태: `%3Cscript%3Ealert(1)%3C%2Fscript%3E`
+
+```bash
+curl -i "${APP_URL}/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+```
+
+기대하는 반응은 아래 둘 중 하나입니다.
+
+- ModSecurity / CRS 룰에 걸려 `403` 이 반환됨
+- 응답은 통과되더라도 ingress-nginx 쪽 로그에 ModSecurity 탐지 흔적이 남음
+
+즉 `403` 이 반드시 나와야만 성공이라고 보기보다는, 실제 탐지 또는 차단이 발생하는지까지 함께 보는 편이 좋습니다.
+
+### 4.4 ingress-nginx 로그에서 ModSecurity 흔적 확인
+
+요청을 보낸 직후 ingress-nginx controller 로그를 확인합니다.
+
+```bash
+kubectl logs -n ingress-nginx ds/ingress-nginx-controller -f | grep -i modsecurity
+```
+
+또는 특정 controller Pod 하나만 보고 싶다면:
+
+```bash
+kubectl logs -n ingress-nginx <ingress-pod-name> -f | grep -i modsecurity
+```
+
+여기서 `ModSecurity` 관련 로그가 보이면 실제 요청 경로에서 룰이 동작한 것으로 볼 수 있습니다.
+
+## 5. Fluent Bit Sidecar 확인
+
+현재 구조에서는 `ingress-nginx controller` 가 ModSecurity audit JSON 을 `/var/log/audit/modsec_audit.log` 에 쓰고, 같은 Pod 안의 `fluent-bit-sidecar` 가 이 파일을 읽어 Kafka 로 보내는 역할을 합니다.
+
+즉 ingress-nginx 안에 ModSecurity 가 켜져 있어도, sidecar 가 안 떠 있거나 audit 파일을 못 읽으면 보안 이벤트 파이프라인은 끝까지 이어지지 않습니다.
+
+### 5.1 sidecar 컨테이너가 같이 떠 있는지 확인
+
+```bash
+kubectl get pods -n ingress-nginx -o wide
+kubectl get pod -n ingress-nginx <pod-name> -o jsonpath='{.spec.containers[*].name}'
+```
+
+여기서 `controller` 와 `fluent-bit-sidecar` 가 같이 보여야 합니다.
+
+### 5.2 sidecar ConfigMap 과 핵심 설정 확인
+
+```bash
+kubectl get configmap modsecurity-audit-sidecar-config -n ingress-nginx -o yaml
+```
+
+최소한 아래 항목은 보이는 것이 좋습니다.
+
+- `Path /var/log/audit/modsec_audit.log`
+- `Parser modsecurity_json`
+- `Brokers kafka.logging.svc.cluster.local:9092`
+
+즉 sidecar 가 어느 파일을 읽고, 어떤 parser 를 쓰며, 어디로 보내는지까지 한 번에 확인하는 단계입니다.
+
+### 5.3 controller 안 audit 파일 생성 확인
+
+```bash
+kubectl exec -n ingress-nginx <pod-name> -c controller -- \
+  sh -c 'ls -l /var/log/audit/modsec_audit.log'
+
+kubectl exec -n ingress-nginx <pod-name> -c controller -- \
+  sh -c 'tail -n 5 /var/log/audit/modsec_audit.log'
+```
+
+여기서 JSON 한 줄씩 누적되는 것이 보이면 ModSecurity audit 파일 자체는 정상적으로 생성되고 있다고 볼 수 있습니다.
+
+### 5.4 sidecar 로그 확인
+
+```bash
+kubectl logs -n ingress-nginx <pod-name> -c fluent-bit-sidecar --tail=200
+```
+
+현재 Kafka 가 아직 열려 있지 않다면 아래 같은 로그가 보일 수 있습니다.
+
+- `inotify_fs_add()`
+- `No route to host`
+- `message delivery failed`
+
+이 경우에도 input 이 살아 있고 audit 파일 감시가 시작됐다면 sidecar 자체는 정상에 가깝습니다.
+
+### 5.5 실제 이벤트가 sidecar 까지 올라오는지 확인
+
+간단한 ModSecurity 테스트 요청을 보낸 뒤:
+
+```bash
+curl -i "${APP_URL}/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+```
+
+또는 JSON POST 엔드포인트가 있다면:
+
+```bash
+curl -i -X POST "${APP_URL}/<json-post-path>" \
+  -H 'Content-Type: application/json' \
+  --data '{"name":"1 OR 1=1"}'
+```
+
+그 다음 아래 둘 중 하나를 확인합니다.
+
+```bash
+kubectl exec -n ingress-nginx <pod-name> -c controller -- \
+  sh -c "grep -E '942100|949110|\\\"method\\\":\\\"POST\\\"' /var/log/audit/modsec_audit.log | tail -10"
+```
+
+```bash
+kubectl logs -n ingress-nginx \
+  -l app.kubernetes.io/component=controller \
+  -c fluent-bit-sidecar \
+  --since=1m --prefix --max-log-requests=10
+```
+
+여기서 기대하는 것은 아래 둘 중 하나입니다.
+
+- audit 파일에 실제 탐지 이벤트가 기록된다.
+- sidecar 로그에서 audit JSON 처리 또는 Kafka 전송 시도 흔적이 보인다.
+
+즉 `ModSecurity 탐지 -> audit 파일 기록 -> fluent-bit-sidecar 처리` 까지 이어지면 현재 구조 검증은 충분히 된 것입니다.

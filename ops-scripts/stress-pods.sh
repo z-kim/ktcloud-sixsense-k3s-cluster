@@ -5,7 +5,7 @@ set -euo pipefail
 namespace="apps"
 seconds="60"
 container=""
-selector="app=checkins"
+selector="app=doc-converter"
 count=""
 
 is_stressable_pod() {
@@ -31,14 +31,14 @@ Options:
   -n, --namespace <namespace>   Kubernetes namespace (default: apps)
   -s, --seconds <seconds>       CPU burn duration in seconds (default: 60)
   -c, --container <name>        Container name when Pods have multiple containers
-  -l, --selector <selector>     Label selector for automatic Pod lookup (default: app=checkins)
+  -l, --selector <selector>     Label selector for automatic Pod lookup (default: app=doc-converter)
   -p, --count <count>           Number of running Pods to stress automatically
   -h, --help                    Show this help message
 
 Examples:
-  bash ops-scripts/stress-pods.sh -n apps -s 90 checkins-pod-a
-  bash ops-scripts/stress-pods.sh -n apps -s 90 checkins-pod-a checkins-pod-b
-  bash ops-scripts/stress-pods.sh -n apps -l app=checkins -p 2 -s 90
+  bash ops-scripts/stress-pods.sh -n apps -s 90 doc-converter-pod-a
+  bash ops-scripts/stress-pods.sh -n apps -s 90 doc-converter-pod-a doc-converter-pod-b
+  bash ops-scripts/stress-pods.sh -n apps -l app=doc-converter -p 2 -s 90
 EOF
 }
 
