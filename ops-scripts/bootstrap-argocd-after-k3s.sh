@@ -25,6 +25,8 @@ argocd_cli_port_forward_port="18080"
 argocd_cli_port_forward_log="/tmp/argocd-cli-port-forward.log"
 argocd_server_selector="app.kubernetes.io/part-of=argocd,app.kubernetes.io/component=server"
 external_secrets_controller_deployment_name="external-secrets"
+external_secrets_webhook_deployment_name="external-secrets-webhook"
+external_secrets_webhook_service_name="external-secrets-webhook"
 argocd_repo_secret_name="argocd-root-repo"
 argocd_repo_secret_namespace="argocd"
 usage() {
@@ -283,11 +285,79 @@ wait_for_external_secrets() {
 
   info "Detected External Secrets controller deployment: ${external_secrets_controller_deployment_name}"
   kubectl rollout status "deployment/${external_secrets_controller_deployment_name}" -n external-secrets --timeout="${timeout_seconds}s"
+
+  seconds_left="$timeout_seconds"
+  while true; do
+    if kubectl get deployment "${external_secrets_webhook_deployment_name}" -n external-secrets >/dev/null 2>&1; then
+      break
+    fi
+
+    if [[ "$seconds_left" -le 0 ]]; then
+      print_external_secrets_bootstrap_diagnostics
+      echo "Timed out waiting for External Secrets webhook deployment in namespace external-secrets." >&2
+      exit 1
+    fi
+    sleep 5
+    seconds_left=$((seconds_left - 5))
+  done
+
+  info "Detected External Secrets webhook deployment: ${external_secrets_webhook_deployment_name}"
+  kubectl rollout status "deployment/${external_secrets_webhook_deployment_name}" -n external-secrets --timeout="${timeout_seconds}s"
+}
+
+wait_for_external_secrets_crds() {
+  local seconds_left="$timeout_seconds"
+
+  while true; do
+    if kubectl get crd clustersecretstores.external-secrets.io externalsecrets.external-secrets.io >/dev/null 2>&1 &&
+      kubectl wait --for=condition=Established \
+        crd/clustersecretstores.external-secrets.io \
+        crd/externalsecrets.external-secrets.io \
+        --timeout=30s >/dev/null 2>&1 &&
+      kubectl get --raw /apis/external-secrets.io/v1 2>/dev/null | grep -q '"name":"clustersecretstores"' &&
+      kubectl get --raw /apis/external-secrets.io/v1 2>/dev/null | grep -q '"name":"externalsecrets"'; then
+      break
+    fi
+
+    if [[ "$seconds_left" -le 0 ]]; then
+      print_external_secrets_bootstrap_diagnostics
+      kubectl get crd | grep 'external-secrets.io' || true
+      kubectl get --raw /apis/external-secrets.io/v1 2>/dev/null || true
+      echo "Timed out waiting for External Secrets CRDs to be established." >&2
+      exit 1
+    fi
+    sleep 5
+    seconds_left=$((seconds_left - 5))
+  done
+
+  info "Detected External Secrets CRDs: clustersecretstores.external-secrets.io, externalsecrets.external-secrets.io"
+
+  seconds_left="$timeout_seconds"
+  while true; do
+    if [[ -n "$(
+      kubectl get endpoints "${external_secrets_webhook_service_name}" -n external-secrets \
+        -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true
+    )" ]]; then
+      break
+    fi
+
+    if [[ "$seconds_left" -le 0 ]]; then
+      print_external_secrets_bootstrap_diagnostics
+      kubectl get endpoints "${external_secrets_webhook_service_name}" -n external-secrets -o yaml 2>/dev/null || true
+      echo "Timed out waiting for External Secrets webhook endpoints to be ready." >&2
+      exit 1
+    fi
+    sleep 5
+    seconds_left=$((seconds_left - 5))
+  done
+
+  info "Detected External Secrets webhook endpoints: ${external_secrets_webhook_service_name}"
 }
 
 wait_for_argocd_repo_secret() {
   local seconds_left="$timeout_seconds"
   local github_app_id=""
+  local github_app_installation_id=""
   local github_app_private_key=""
 
   while true; do
@@ -295,12 +365,16 @@ wait_for_argocd_repo_secret() {
       kubectl get secret "${argocd_repo_secret_name}" -n "${argocd_repo_secret_namespace}" \
         -o jsonpath='{.data.githubAppID}' 2>/dev/null || true
     )"
+    github_app_installation_id="$(
+      kubectl get secret "${argocd_repo_secret_name}" -n "${argocd_repo_secret_namespace}" \
+        -o jsonpath='{.data.githubAppInstallationID}' 2>/dev/null || true
+    )"
     github_app_private_key="$(
       kubectl get secret "${argocd_repo_secret_name}" -n "${argocd_repo_secret_namespace}" \
         -o jsonpath='{.data.githubAppPrivateKey}' 2>/dev/null || true
     )"
 
-    if [[ -n "${github_app_id}" && -n "${github_app_private_key}" ]]; then
+    if [[ -n "${github_app_id}" && -n "${github_app_installation_id}" && -n "${github_app_private_key}" ]]; then
       break
     fi
 
@@ -441,6 +515,7 @@ else
 fi
 
 print_header "External Secrets Resources"
+wait_for_external_secrets_crds
 kubectl apply -f "$external_secrets_clustersecretstore_file"
 kubectl apply -f "$external_secrets_argocd_repo_file"
 wait_for_argocd_repo_secret
