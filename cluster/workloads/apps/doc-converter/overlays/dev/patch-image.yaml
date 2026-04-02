@@ -10,4 +10,4 @@ spec:
     spec:
       containers:
         - name: doc-converter
-          image: z33hyo/doc-converter:0.2
+          image: z33hyo/doc-converter:0.3

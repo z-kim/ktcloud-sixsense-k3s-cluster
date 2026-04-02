@@ -8,6 +8,10 @@ timeout_seconds="300"
 force_bootstrap="false"
 
 namespace_file="${cluster_dir}/bootstrap/00-namespaces.yaml"
+external_secrets_values_file="${cluster_dir}/bootstrap/external-secrets/values.yaml"
+external_secrets_helmchart_file="${cluster_dir}/bootstrap/external-secrets/helmchart.yaml"
+external_secrets_clustersecretstore_file="${cluster_dir}/bootstrap/external-secrets/clustersecretstore.yaml"
+external_secrets_argocd_repo_file="${cluster_dir}/bootstrap/external-secrets/argocd-root-repo.externalsecret.yaml"
 argocd_values_file="${cluster_dir}/bootstrap/argocd/values.yaml"
 argocd_helmchart_file="${cluster_dir}/bootstrap/argocd/helmchart.yaml"
 root_app_file=""
@@ -20,7 +24,9 @@ argocd_cli_download_path="/tmp/argocd-linux-amd64"
 argocd_cli_port_forward_port="18080"
 argocd_cli_port_forward_log="/tmp/argocd-cli-port-forward.log"
 argocd_server_selector="app.kubernetes.io/part-of=argocd,app.kubernetes.io/component=server"
-
+external_secrets_controller_deployment_name="external-secrets"
+argocd_repo_secret_name="argocd-root-repo"
+argocd_repo_secret_namespace="argocd"
 usage() {
   cat <<'EOF'
 Usage:
@@ -39,7 +45,7 @@ Options:
 Notes:
   - This script assumes K3s is already installed and kubectl can reach the local cluster.
   - It mirrors the post-K3s part of external-ref Ansible:
-    namespace/bootstrap -> doc-converter-config -> kafka-alias -> root-app
+    namespace/bootstrap -> external-secrets -> argocd -> doc-converter-config -> kafka-alias -> root-app
   - If the argocd CLI is missing, the script downloads and installs it after argocd-server becomes available.
   - Default operational mode is `argocd --core ...`. Server mode/UI access can be opened separately only when needed.
   - For now, doc-converter-config and kafka-alias are applied from hardcoded reference manifests.
@@ -85,6 +91,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 namespace_file="${cluster_dir}/bootstrap/00-namespaces.yaml"
+external_secrets_values_file="${cluster_dir}/bootstrap/external-secrets/values.yaml"
+external_secrets_helmchart_file="${cluster_dir}/bootstrap/external-secrets/helmchart.yaml"
+external_secrets_clustersecretstore_file="${cluster_dir}/bootstrap/external-secrets/clustersecretstore.yaml"
+external_secrets_argocd_repo_file="${cluster_dir}/bootstrap/external-secrets/argocd-root-repo.externalsecret.yaml"
 argocd_values_file="${cluster_dir}/bootstrap/argocd/values.yaml"
 argocd_helmchart_file="${cluster_dir}/bootstrap/argocd/helmchart.yaml"
 root_app_file="${root_app_file:-${cluster_dir}/argocd/applications/root.yaml}"
@@ -141,6 +151,18 @@ print_argocd_bootstrap_diagnostics() {
   warn "Current argocd namespace resources:"
   kubectl get deploy,svc -n argocd --show-labels 2>/dev/null || true
   kubectl get all -n argocd 2>/dev/null || true
+}
+
+print_external_secrets_bootstrap_diagnostics() {
+  warn "Current external-secrets namespace resources:"
+  kubectl get deploy,svc -n external-secrets --show-labels 2>/dev/null || true
+  kubectl get all -n external-secrets 2>/dev/null || true
+}
+
+print_argocd_repo_secret_diagnostics() {
+  warn "Current Argo CD repo secret resources:"
+  kubectl get externalsecret "${argocd_repo_secret_name}" -n "${argocd_repo_secret_namespace}" -o yaml 2>/dev/null || true
+  kubectl get secret "${argocd_repo_secret_name}" -n "${argocd_repo_secret_namespace}" -o yaml 2>/dev/null || true
 }
 
 require_file() {
@@ -242,6 +264,58 @@ wait_for_argocd() {
   kubectl rollout status "deployment/${deployment_name}" -n argocd --timeout="${timeout_seconds}s"
 }
 
+wait_for_external_secrets() {
+  local seconds_left="$timeout_seconds"
+
+  while true; do
+    if kubectl get deployment "${external_secrets_controller_deployment_name}" -n external-secrets >/dev/null 2>&1; then
+      break
+    fi
+
+    if [[ "$seconds_left" -le 0 ]]; then
+      print_external_secrets_bootstrap_diagnostics
+      echo "Timed out waiting for External Secrets controller deployment in namespace external-secrets." >&2
+      exit 1
+    fi
+    sleep 5
+    seconds_left=$((seconds_left - 5))
+  done
+
+  info "Detected External Secrets controller deployment: ${external_secrets_controller_deployment_name}"
+  kubectl rollout status "deployment/${external_secrets_controller_deployment_name}" -n external-secrets --timeout="${timeout_seconds}s"
+}
+
+wait_for_argocd_repo_secret() {
+  local seconds_left="$timeout_seconds"
+  local github_app_id=""
+  local github_app_private_key=""
+
+  while true; do
+    github_app_id="$(
+      kubectl get secret "${argocd_repo_secret_name}" -n "${argocd_repo_secret_namespace}" \
+        -o jsonpath='{.data.githubAppID}' 2>/dev/null || true
+    )"
+    github_app_private_key="$(
+      kubectl get secret "${argocd_repo_secret_name}" -n "${argocd_repo_secret_namespace}" \
+        -o jsonpath='{.data.githubAppPrivateKey}' 2>/dev/null || true
+    )"
+
+    if [[ -n "${github_app_id}" && -n "${github_app_private_key}" ]]; then
+      break
+    fi
+
+    if [[ "$seconds_left" -le 0 ]]; then
+      print_argocd_repo_secret_diagnostics
+      echo "Timed out waiting for Argo CD repo Secret ${argocd_repo_secret_namespace}/${argocd_repo_secret_name} to be created by External Secrets." >&2
+      exit 1
+    fi
+    sleep 5
+    seconds_left=$((seconds_left - 5))
+  done
+
+  info "Detected Argo CD repo Secret: ${argocd_repo_secret_namespace}/${argocd_repo_secret_name}"
+}
+
 install_argocd_cli() {
   local pf_pid=""
   local seconds_left="$timeout_seconds"
@@ -314,6 +388,10 @@ if ! [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || [[ "$timeout_seconds" -lt 1 ]]; the
 fi
 
 require_file "$namespace_file"
+require_file "$external_secrets_values_file"
+require_file "$external_secrets_helmchart_file"
+require_file "$external_secrets_clustersecretstore_file"
+require_file "$external_secrets_argocd_repo_file"
 require_file "$argocd_values_file"
 require_file "$argocd_helmchart_file"
 require_file "$root_app_file"
@@ -331,23 +409,47 @@ ensure_shell_kubeconfig_default
 print_header "Kubernetes"
 kubectl get nodes >/dev/null
 
+namespace_bootstrap_required="false"
+eso_bootstrap_required="false"
 argocd_bootstrap_required="false"
 if [[ "$force_bootstrap" == "true" ]]; then
+  namespace_bootstrap_required="true"
+  eso_bootstrap_required="true"
   argocd_bootstrap_required="true"
 else
+  namespace_bootstrap_required="true"
+  if ! kubectl get deployment "${external_secrets_controller_deployment_name}" -n external-secrets >/dev/null 2>&1; then
+    eso_bootstrap_required="true"
+  fi
   if [[ -z "$(get_argocd_server_deployment_name)" ]]; then
     argocd_bootstrap_required="true"
   fi
 fi
 
-if [[ "$argocd_bootstrap_required" == "true" ]]; then
-  print_header "Bootstrap"
+print_header "Bootstrap"
+
+if [[ "$namespace_bootstrap_required" == "true" ]]; then
   kubectl apply -f "$namespace_file"
+fi
+
+if [[ "$eso_bootstrap_required" == "true" ]]; then
+  kubectl apply -f "$external_secrets_values_file"
+  kubectl apply -f "$external_secrets_helmchart_file"
+  wait_for_external_secrets
+else
+  warn "External Secrets controller deployment already exists. Skipping External Secrets bootstrap."
+fi
+
+print_header "External Secrets Resources"
+kubectl apply -f "$external_secrets_clustersecretstore_file"
+kubectl apply -f "$external_secrets_argocd_repo_file"
+wait_for_argocd_repo_secret
+
+if [[ "$argocd_bootstrap_required" == "true" ]]; then
   kubectl apply -f "$argocd_values_file"
   kubectl apply -f "$argocd_helmchart_file"
   wait_for_argocd
 else
-  print_header "Bootstrap"
   warn "Argo CD server deployment already exists. Skipping namespace/Argo CD bootstrap."
 fi
 
@@ -363,7 +465,10 @@ print_header "Root App"
 kubectl apply -f "$root_app_file"
 
 print_header "Summary"
-kubectl get ns argocd logging apps
+kubectl get ns argocd external-secrets logging apps
+kubectl get deploy external-secrets -n external-secrets 2>/dev/null || true
+kubectl get clustersecretstore sixsense-parameter-store 2>/dev/null || true
+kubectl get externalsecret argocd-root-repo -n argocd 2>/dev/null || true
 kubectl get configmap doc-converter-config -n apps
 kubectl get svc,endpointslice -n logging | grep kafka || true
 kubectl get -f "$root_app_file"

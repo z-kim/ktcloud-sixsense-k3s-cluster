@@ -1,0 +1,50 @@
+# K3s bootstrap 단계에서 External Secrets Operator chart에 주입할 HelmChartConfig다.
+# 현재는 bootstrap/controller 성격으로만 두고, control-plane 노드에만 배치한다.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: external-secrets
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    installCRDs: true
+
+    replicaCount: 1
+
+    global:
+      nodeSelector:
+        node-role.k3s-project.io/control-plane: "true"
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 150m
+        memory: 192Mi
+
+    webhook:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 150m
+          memory: 192Mi
+
+    certController:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 150m
+          memory: 192Mi

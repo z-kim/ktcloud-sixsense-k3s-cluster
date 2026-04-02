@@ -160,6 +160,25 @@ run_rollout_check deployment argocd-server argocd "argocd server Deployment is r
 run_rollout_check deployment argocd-repo-server argocd "argocd repo-server Deployment is ready"
 kubectl get pods -n argocd -o wide 2>/dev/null || true
 
+print_header "External Secrets"
+run_rollout_check deployment external-secrets external-secrets "external-secrets Deployment is ready"
+if kubectl get clustersecretstore sixsense-parameter-store >/dev/null 2>&1; then
+  ok "ClusterSecretStore/sixsense-parameter-store exists"
+else
+  fail "ClusterSecretStore/sixsense-parameter-store exists"
+fi
+if kubectl get externalsecret argocd-root-repo -n argocd >/dev/null 2>&1; then
+  ok "ExternalSecret/argocd-root-repo exists in argocd namespace"
+else
+  fail "ExternalSecret/argocd-root-repo exists in argocd namespace"
+fi
+if kubectl get secret argocd-root-repo -n argocd >/dev/null 2>&1; then
+  ok "Secret/argocd-root-repo exists in argocd namespace"
+else
+  fail "Secret/argocd-root-repo exists in argocd namespace"
+fi
+kubectl get pods -n external-secrets -o wide 2>/dev/null || true
+
 print_header "Checkins App"
 run_rollout_check deployment checkins apps "checkins Deployment is ready"
 kubectl get pods -n apps -l app=checkins -o wide 2>/dev/null || true

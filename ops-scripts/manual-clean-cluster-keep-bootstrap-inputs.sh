@@ -142,13 +142,20 @@ print_header "Delete ingress-nginx Sidecar Config"
 kubectl delete -f "${cluster_dir}/manifests/ingress-nginx/modsecurity-audit-sidecar-config.yaml" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
 print_header "Delete HelmChart Resources"
-for chart in argocd ingress-nginx fluent-bit falco; do
+for chart in argocd external-secrets ingress-nginx fluent-bit falco; do
   kubectl delete helmchart "$chart" -n kube-system --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl delete helmchartconfig "$chart" -n kube-system --ignore-not-found --wait=false >/dev/null 2>&1 || true
 done
 
+print_header "Delete External Secrets Resources"
+kubectl delete externalsecret argocd-root-repo -n argocd --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl delete secret argocd-root-repo -n argocd --ignore-not-found --wait=false >/dev/null 2>&1 || true
+kubectl delete clustersecretstore sixsense-parameter-store --ignore-not-found --wait=false >/dev/null 2>&1 || true
+
+
 if command -v helm >/dev/null 2>&1; then
   helm uninstall argocd -n argocd >/dev/null 2>&1 || true
+  helm uninstall external-secrets -n external-secrets >/dev/null 2>&1 || true
   helm uninstall ingress-nginx -n ingress-nginx >/dev/null 2>&1 || true
   helm uninstall fluent-bit -n logging >/dev/null 2>&1 || true
   helm uninstall falco -n falco >/dev/null 2>&1 || true
@@ -156,10 +163,12 @@ fi
 
 print_header "Delete Helm Release Secrets"
 kubectl delete secret -n kube-system -l owner=helm,name=argocd --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete secret -n kube-system -l owner=helm,name=external-secrets --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret -n kube-system -l owner=helm,name=ingress-nginx --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret -n kube-system -l owner=helm,name=fluent-bit --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret -n kube-system -l owner=helm,name=falco --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret -n argocd -l owner=helm,name=argocd --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete secret -n external-secrets -l owner=helm,name=external-secrets --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret -n ingress-nginx -l owner=helm,name=ingress-nginx --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret -n logging -l owner=helm,name=fluent-bit --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete secret -n falco -l owner=helm,name=falco --ignore-not-found >/dev/null 2>&1 || true
@@ -174,16 +183,16 @@ if [[ "$delete_all" == "true" ]]; then
   print_header "Delete Namespaces"
   kubectl delete secret checkins-secret -n apps --ignore-not-found --wait=false >/dev/null 2>&1 || true
 
-  for namespace in ingress-nginx logging falco monitoring argocd apps; do
+  for namespace in ingress-nginx logging falco monitoring argocd external-secrets apps; do
     kubectl delete namespace "$namespace" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   done
 
-  for namespace in ingress-nginx logging falco monitoring argocd apps; do
+  for namespace in ingress-nginx logging falco monitoring argocd external-secrets apps; do
     wait_for_namespace_delete "$namespace"
   done
 else
   print_header "Keep Namespaces, ConfigMap, And Kafka Alias"
-  echo "[INFO] Keeping ingress-nginx, logging, falco, monitoring, argocd, and apps namespaces."
+  echo "[INFO] Keeping ingress-nginx, logging, falco, monitoring, argocd, external-secrets, and apps namespaces."
   echo "[INFO] Keeping apps/doc-converter-config."
   echo "[INFO] Keeping logging/kafka alias."
   echo "[INFO] Cleaning legacy standalone fluent-bit resources too, if they still exist."
@@ -191,7 +200,7 @@ fi
 
 print_header "Clean Completed Helm Install Pods"
 kubectl get pods -n kube-system -o name 2>/dev/null \
-  | grep -E 'pod/helm-install-(argocd|ingress-nginx|fluent-bit|falco)-' \
+  | grep -E 'pod/helm-install-(argocd|external-secrets|ingress-nginx|fluent-bit|falco)-' \
   | xargs -r kubectl delete -n kube-system >/dev/null 2>&1 || true
 
 print_header "Summary"

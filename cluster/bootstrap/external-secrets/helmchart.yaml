@@ -1,0 +1,12 @@
+# K3s bootstrap 단계에서 External Secrets Operator Helm chart를 설치한다.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: external-secrets
+  namespace: kube-system
+spec:
+  repo: https://charts.external-secrets.io
+  chart: external-secrets
+  version: 1.2.1
+  targetNamespace: external-secrets

@@ -18,6 +18,11 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: external-secrets
+---
+apiVersion: v1
+kind: Namespace
+metadata:
   name: falco
 ---
 apiVersion: v1
