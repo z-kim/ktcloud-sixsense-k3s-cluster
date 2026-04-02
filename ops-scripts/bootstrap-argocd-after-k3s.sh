@@ -1,4 +1,265 @@
-ㅊ argocd CLI automatically." >&2
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cluster_dir="${repo_root}/cluster"
+timeout_seconds="300"
+force_bootstrap="false"
+
+namespace_file="${cluster_dir}/bootstrap/00-namespaces.yaml"
+argocd_values_file="${cluster_dir}/bootstrap/argocd/values.yaml"
+argocd_helmchart_file="${cluster_dir}/bootstrap/argocd/helmchart.yaml"
+root_app_file=""
+doc_converter_configmap_file="${cluster_dir}/references/bootstrap-inputs/doc-converter-configmap.input.yaml"
+kafka_alias_file="${cluster_dir}/references/bootstrap-inputs/kafka-alias.yaml"
+legacy_doc_converter_configmap_file="${cluster_dir}/references/bootstrap-inputs/doc-converter-configmap.yaml"
+legacy_doc_converter_configmap_typo_file="${cluster_dir}/references/bootstrap-inputs/docker-converter-configmap.yaml"
+argocd_cli_install_path="/usr/local/bin/argocd"
+argocd_cli_download_path="/tmp/argocd-linux-amd64"
+argocd_cli_port_forward_port="18080"
+argocd_cli_port_forward_log="/tmp/argocd-cli-port-forward.log"
+argocd_server_selector="app.kubernetes.io/part-of=argocd,app.kubernetes.io/component=server"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bash ops-scripts/bootstrap-argocd-after-k3s.sh [options]
+
+Options:
+  -t, --timeout <seconds>          Rollout timeout in seconds (default: 300)
+  --cluster-dir <path>             Cluster directory path
+  --root-app-file <path>           Root application manifest path
+  --doc-converter-configmap-file <path>
+                                   Hardcoded doc-converter ConfigMap manifest path
+  --kafka-alias-file <path>        Hardcoded kafka alias manifest path
+  --force-bootstrap                Re-apply namespace and Argo CD bootstrap even if argocd-server exists
+  -h, --help                       Show this help
+
+Notes:
+  - This script assumes K3s is already installed and kubectl can reach the local cluster.
+  - It mirrors the post-K3s part of external-ref Ansible:
+    namespace/bootstrap -> doc-converter-config -> kafka-alias -> root-app
+  - If the argocd CLI is missing, the script downloads and installs it after argocd-server becomes available.
+  - Default operational mode is `argocd --core ...`. Server mode/UI access can be opened separately only when needed.
+  - For now, doc-converter-config and kafka-alias are applied from hardcoded reference manifests.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -t|--timeout)
+      timeout_seconds="$2"
+      shift 2
+      ;;
+    --cluster-dir)
+      cluster_dir="$2"
+      shift 2
+      ;;
+    --root-app-file)
+      root_app_file="$2"
+      shift 2
+      ;;
+    --doc-converter-configmap-file)
+      doc_converter_configmap_file="$2"
+      shift 2
+      ;;
+    --kafka-alias-file)
+      kafka_alias_file="$2"
+      shift 2
+      ;;
+    --force-bootstrap)
+      force_bootstrap="true"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+namespace_file="${cluster_dir}/bootstrap/00-namespaces.yaml"
+argocd_values_file="${cluster_dir}/bootstrap/argocd/values.yaml"
+argocd_helmchart_file="${cluster_dir}/bootstrap/argocd/helmchart.yaml"
+root_app_file="${root_app_file:-${cluster_dir}/argocd/applications/root.yaml}"
+
+print_header() {
+  printf '\n== %s ==\n' "$1"
+}
+
+warn() {
+  printf '[WARN] %s\n' "$1"
+}
+
+info() {
+  printf '[INFO] %s\n' "$1"
+}
+
+get_argocd_server_deployment_name() {
+  local deployment_name=""
+
+  deployment_name="$(
+    kubectl get deployment -n argocd -l "${argocd_server_selector}" \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+  )"
+
+  if [[ -z "${deployment_name}" ]]; then
+    deployment_name="$(
+      kubectl get deployment argocd-server -n argocd \
+        -o jsonpath='{.metadata.name}' 2>/dev/null || true
+    )"
+  fi
+
+  printf '%s' "${deployment_name}"
+}
+
+get_argocd_server_service_name() {
+  local service_name=""
+
+  service_name="$(
+    kubectl get svc -n argocd -l "${argocd_server_selector}" \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+  )"
+
+  if [[ -z "${service_name}" ]]; then
+    service_name="$(
+      kubectl get svc argocd-server -n argocd \
+        -o jsonpath='{.metadata.name}' 2>/dev/null || true
+    )"
+  fi
+
+  printf '%s' "${service_name}"
+}
+
+print_argocd_bootstrap_diagnostics() {
+  warn "Current argocd namespace resources:"
+  kubectl get deploy,svc -n argocd --show-labels 2>/dev/null || true
+  kubectl get all -n argocd 2>/dev/null || true
+}
+
+require_file() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    echo "required file not found: $path" >&2
+    exit 1
+  fi
+}
+
+validate_doc_converter_configmap() {
+  if [[ ! -f "$doc_converter_configmap_file" ]]; then
+    if [[ -f "$legacy_doc_converter_configmap_file" ]]; then
+      warn "Using legacy doc-converter config path: ${legacy_doc_converter_configmap_file}"
+      doc_converter_configmap_file="$legacy_doc_converter_configmap_file"
+    elif [[ -f "$legacy_doc_converter_configmap_typo_file" ]]; then
+      warn "Using legacy doc-converter config path: ${legacy_doc_converter_configmap_typo_file}"
+      doc_converter_configmap_file="$legacy_doc_converter_configmap_typo_file"
+    fi
+  fi
+
+  if [[ ! -f "$doc_converter_configmap_file" ]]; then
+    echo "doc-converter configmap file not found: $doc_converter_configmap_file" >&2
+    echo "Hint: copy ${cluster_dir}/references/bootstrap-inputs/doc-converter-configmap.input.yaml.example to doc-converter-configmap.input.yaml and fill S3_BUCKET_NAME." >&2
+    exit 1
+  fi
+
+  if ! grep -Eq '^[[:space:]]*S3_BUCKET_NAME:' "$doc_converter_configmap_file"; then
+    echo "doc-converter configmap file must contain a hardcoded S3_BUCKET_NAME before apply: $doc_converter_configmap_file" >&2
+    exit 1
+  fi
+}
+
+ensure_kubeconfig() {
+  if [[ -n "${KUBECONFIG:-}" && -f "${KUBECONFIG}" ]]; then
+    return 0
+  fi
+
+  if [[ -f "${HOME}/.kube/config" ]]; then
+    export KUBECONFIG="${HOME}/.kube/config"
+    return 0
+  fi
+
+  if [[ -f /etc/rancher/k3s/k3s.yaml ]]; then
+    mkdir -p "${HOME}/.kube"
+    cp /etc/rancher/k3s/k3s.yaml "${HOME}/.kube/config"
+    chmod 600 "${HOME}/.kube/config"
+    export KUBECONFIG="${HOME}/.kube/config"
+    return 0
+  fi
+
+  echo "kubeconfig not found. Set KUBECONFIG or ensure /etc/rancher/k3s/k3s.yaml exists." >&2
+  exit 1
+}
+
+ensure_shell_kubeconfig_default() {
+  local bashrc="${HOME}/.bashrc"
+  local start_marker="# >>> sixsense kubeconfig >>>"
+  local end_marker="# <<< sixsense kubeconfig <<<"
+
+  touch "${bashrc}"
+
+  if grep -Fq "${start_marker}" "${bashrc}"; then
+    return 0
+  fi
+
+  cat >> "${bashrc}" <<'EOF'
+
+# >>> sixsense kubeconfig >>>
+if [ -z "${KUBECONFIG:-}" ] && [ -f "$HOME/.kube/config" ]; then
+  export KUBECONFIG="$HOME/.kube/config"
+fi
+# <<< sixsense kubeconfig <<<
+EOF
+
+  info "Added KUBECONFIG default to ${bashrc}. Re-login or run: source ~/.bashrc"
+}
+
+wait_for_argocd() {
+  local seconds_left="$timeout_seconds"
+  local deployment_name=""
+
+  while true; do
+    deployment_name="$(get_argocd_server_deployment_name)"
+    if [[ -n "${deployment_name}" ]]; then
+      break
+    fi
+
+    if [[ "$seconds_left" -le 0 ]]; then
+      print_argocd_bootstrap_diagnostics
+      echo "Timed out waiting for Argo CD server deployment in namespace argocd." >&2
+      exit 1
+    fi
+    sleep 5
+    seconds_left=$((seconds_left - 5))
+  done
+
+  info "Detected Argo CD server deployment: ${deployment_name}"
+  kubectl rollout status "deployment/${deployment_name}" -n argocd --timeout="${timeout_seconds}s"
+}
+
+install_argocd_cli() {
+  local pf_pid=""
+  local seconds_left="$timeout_seconds"
+  local download_url="https://127.0.0.1:${argocd_cli_port_forward_port}/download/argocd-linux-amd64"
+  cleanup_argocd_cli_install() {
+    if [[ -n "${pf_pid}" ]]; then
+      kill "${pf_pid}" >/dev/null 2>&1 || true
+    fi
+    rm -f "${argocd_cli_download_path}"
+  }
+
+  if command -v argocd >/dev/null 2>&1; then
+    info "argocd CLI already exists in PATH."
+    return 0
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "curl not found. Cannot install argocd CLI automatically." >&2
     exit 1
   fi
 
