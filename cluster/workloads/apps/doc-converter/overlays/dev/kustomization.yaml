@@ -5,6 +5,7 @@ kind: Kustomization
 namespace: apps
 resources:
   - ../../base
+  - service-metrics-nodeport.yaml
 patches:
   - path: patch-image.yaml
   - path: patch-replicas.yaml

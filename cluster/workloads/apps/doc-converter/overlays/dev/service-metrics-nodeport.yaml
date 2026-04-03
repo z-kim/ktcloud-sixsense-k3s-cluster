@@ -1,0 +1,17 @@
+# 외부 Prometheus가 doc-converter 메트릭을 직접 수집할 수 있도록
+# metrics 전용 NodePort Service를 별도로 둔다.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: doc-converter-metrics
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app: doc-converter
+  ports:
+    - name: metrics
+      port: 8000
+      targetPort: http
+      nodePort: 30081
