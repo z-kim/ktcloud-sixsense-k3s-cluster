@@ -1,0 +1,80 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'app/doc-converter/**'
+      - '.github/workflows/ci.yml'
+
+permissions:
+  contents: write # 4번 단계를 위해 반드시 필요합니다.
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1. 도커 허브 로그인 (본인 계정 시크릿 사용)
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      # 2. 이미지 빌드
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: app/doc-converter
+          file: app/doc-converter/Dockerfile
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/doc-converter:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/doc-converter:${{ github.sha }}
+          load: true
+          push: false
+      
+
+      # Trivy 취약점 스캔
+      - name: Run Trivy vulnerability scanner (report results)
+        uses: aquasecurity/trivy-action@v0.35.0  # 안전이 검증된 최신 버전
+        with:
+          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/doc-converter:${{ github.sha }}'
+          format: 'table'           # 터미널에서 보기 편한 테이블 형식
+          severity: 'CRITICAL,HIGH' # 심각 및 높음(High) 단계 체크
+          exit-code: '0'            # 워크플로 중단 X ('0'은 통과, '1'은 중단)
+          ignore-unfixed: true     # 패치 방법 없는 취약점은 제외
+
+      - name: Run Trivy vulnerability scanner (block on CRITICAL)
+        uses: aquasecurity/trivy-action@v0.35.0  # 안전이 검증된 최신 버전
+        with:
+          image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/doc-converter:${{ github.sha }}'
+          severity: 'CRITICAL'  # 심각(Critical) 단계
+          exit-code: '1'        # 해당 취약점 발생시 워크플로 중단
+          ignore-unfixed: true # 패치 방법 없는 취약점은 제외
+
+      # 도커 이미지 push
+      - name: Push image to DockerHub
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/doc-converter:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/doc-converter:${{ github.sha }}
+
+      # 3. [추가된 단계] Kustomize로 태그 수정
+      - name: Update Kustomize image tag
+        run: |
+          cd cluster/workloads/apps/doc-converter/overlays/dev
+          # doc-converter-image 변경
+          kustomize edit set image doc-converter-image=${{ secrets.DOCKERHUB_USERNAME }}/doc-converter:${{ github.sha }}
+
+      # 4. [추가된 단계] 수정된 kustomization.yaml을 GitHub에 다시 푸시1
+      - name: Commit and Push to GitHub
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add cluster/workloads/apps/doc-converter/overlays/dev/kustomization.yaml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: update image tag to ${{ github.sha }}"
+          git push

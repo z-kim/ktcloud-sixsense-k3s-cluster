@@ -1,8 +1,0 @@
-# dev 환경 replica 수를 지정한다.
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: doc-converter
-spec:
-  replicas: 2

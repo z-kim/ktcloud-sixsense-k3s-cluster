@@ -1,3 +1,4 @@
+# Wave 1: 노드 메트릭 수집기(node-exporter)를 기본 인프라와 함께 먼저 올린다.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

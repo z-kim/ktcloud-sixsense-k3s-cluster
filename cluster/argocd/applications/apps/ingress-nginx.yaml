@@ -1,3 +1,4 @@
+# Wave 1: 외부 트래픽을 받을 ingress-nginx를 먼저 배포한다.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

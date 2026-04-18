@@ -1,7 +1,0 @@
-# 현재 bootstrap baseline은 모든 노드 배치를 허용한다.
-# 이 override는 worker node에만 Falco를 두고 싶을 때 덮어쓴다.
-
-nodeSelector:
-  node-role.k3s-project.io/worker: "true"
-
-tolerations: []

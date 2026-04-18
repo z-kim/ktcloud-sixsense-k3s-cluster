@@ -1,5 +1,5 @@
 # dev 환경 리소스 요청/제한을 지정한다.
-# checkins 보다 무겁지만 t3.small worker 2대에서 2~4 replica HPA가 가능하도록 보수적으로 둔다.
+# worker: c7i.flex.large 2대로 설정하였음.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -12,8 +12,8 @@ spec:
         - name: doc-converter
           resources:
             requests:
-              cpu: 150m
-              memory: 384Mi
-            limits:
-              cpu: 700m
+              cpu: 300m
               memory: 768Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi

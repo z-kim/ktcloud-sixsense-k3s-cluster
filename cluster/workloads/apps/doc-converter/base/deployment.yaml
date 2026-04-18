@@ -1,12 +1,12 @@
 # Doc Converter 애플리케이션 Deployment.
-# LibreOffice/ghostscript 기반 변환이 무거워서 checkins 보다 넉넉한 메모리와 startupProbe 를 둔다.
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: doc-converter
 spec:
-  replicas: 2
+  minReadySeconds: 10
+  progressDeadlineSeconds: 600
   selector:
     matchLabels:
       app: doc-converter
@@ -23,6 +23,15 @@ spec:
       terminationGracePeriodSeconds: 60
       nodeSelector:
         node-role.k3s-project.io/worker: "true"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: doc-converter
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -35,8 +44,12 @@ spec:
           emptyDir: {}
       containers:
         - name: doc-converter
-          image: placeholder.invalid/doc-converter:dev
-          imagePullPolicy: Always
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15"] #기존 연결 마무리 시간 15초
+          image: doc-converter-image:dev
+          imagePullPolicy: IfNotPresent #같은 태그 있으면 캐시된 image 받음
           ports:
             - containerPort: 8000
               name: http

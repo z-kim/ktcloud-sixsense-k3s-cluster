@@ -1,13 +1,16 @@
-# dev 환경용 Doc Converter 오버레이.
+# dev 환경용 Doc Converter 오버레이
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: apps
 resources:
-  - ../../base
-  - service-metrics-nodeport.yaml
+- ../../base
+- service-metrics-nodeport.yaml
 patches:
-  - path: patch-image.yaml
-  - path: patch-replicas.yaml
-  - path: patch-resources.yaml
-  - path: patch-tolerations.yaml
+- path: patch-resources.yaml
+- path: patch-tolerations.yaml
+- path: patch-runtime-info.yaml
+images:
+- name: doc-converter-image
+  newName: z33hyo/doc-converter
+  newTag: "0.3" # CI/CD Pipeline 워크플로우 돌때마다 해당 github SHA로 교체

@@ -1,3 +1,4 @@
+# Wave 2: ingress와 기본 인프라가 준비된 뒤 런타임 보안(Falco)을 배포한다.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

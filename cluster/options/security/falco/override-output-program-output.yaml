@@ -1,8 +1,0 @@
-# 탐지 시각을 stdout 외 별도 경로로 확인하고 싶을 때 program_output 을 잠깐 켠다.
-# baseline 또는 placement override와 함께 조합해서 쓴다.
-
-falco:
-  program_output:
-    enabled: true
-    keep_alive: false
-    program: "tee -a /tmp/falco-program-output.log"

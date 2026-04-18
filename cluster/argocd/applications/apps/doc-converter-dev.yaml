@@ -1,3 +1,4 @@
+# Wave 3: 공통 인프라와 보안 구성 이후에 doc-converter 앱을 배포한다.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
