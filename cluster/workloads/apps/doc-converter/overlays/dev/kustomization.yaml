@@ -13,4 +13,4 @@ patches:
 images:
 - name: doc-converter-image
   newName: z33hyo/doc-converter
-  newTag: "0.3" # CI/CD Pipeline 워크플로우 돌때마다 해당 github SHA로 교체
+  newTag: "0.4" # CI/CD Pipeline 워크플로우 돌때마다 해당 github SHA로 교체

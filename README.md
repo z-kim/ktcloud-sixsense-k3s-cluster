@@ -315,7 +315,7 @@ bootstrap을 그대로 사용하려면 다음도 준비돼 있어야 합니다.
 images:
   - name: doc-converter-image
     newName: z33hyo/doc-converter
-    newTag: "0.3"
+    newTag: "0.4"
 ```
 
 CI가 실행될 때마다 `newTag`는 `github.sha`로 갱신됩니다.
